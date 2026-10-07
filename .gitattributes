@@ -1,0 +1,10 @@
+# Depoda ve sunucuda satır sonu her zaman LF. Windows'ta git'in CRLF'ye çevirmesi
+# systemd dosyalarını ve shell scriptlerini Linux'ta bozar.
+* text=auto eol=lf
+
+# Test fixture'ları siteden indirildiği haliyle, bayt bayt korunur
+# (ör. RG .htm dosyası Windows-1254 kodlamalı; satır sonu değişirse testler gerçeği yansıtmaz).
+tests/fixtures/** binary
+
+*.pdf binary
+*.png binary
