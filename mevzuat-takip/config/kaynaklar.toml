@@ -1,0 +1,34 @@
+# ⚠ SADECE İLK KURULUM TOHUMU (2026-10-03'ten beri): ilk çalışmada veritabanına bir kez aktarılır.
+#   Sonra kaynaklar panelden (Kaynaklar sayfası) yönetilir; bu dosyayı düzenlemek tek başına bir şey değiştirmez.
+#   Dosyayla değişiklik: `mevzuat.cli ayar-disa-aktar` → düzenle → `mevzuat.cli ayar-ice-aktar`.
+#
+# Taranan kaynaklar. Yeni kaynak eklemek için yeni bir [[kaynak]] bloğu ekle.
+#
+# Ortak alanlar:
+#   ad     — tekil, kısa ad. DB'de checkpoint ve kayıtlar bu adla tutulur; sonradan DEĞİŞTİRME.
+#   tip    — kaynak tipi (bilinenler: resmi_gazete, wordpress, gib, tarayici). Tipe özel alanlar ilgili
+#            sources/<tip>.py dosyasının başında. tarayici: sadece API'si ve düz HTML'i olmayan siteler için.
+#   etiket — rapordaki kaynakçada görünen ad.
+#   aktif  — false yapılırsa taranmaz (varsayılan true).
+#   varsayilan_konular — bu kaynağın HER kaydı, başlığına bakılmaksızın bu konularla ilgili sayılır.
+#                        Adlar config/konular.toml'daki konu adlarıyla birebir aynı olmalı.
+
+[[kaynak]]
+ad = "resmi_gazete"
+tip = "resmi_gazete"
+etiket = "Resmî Gazete"
+
+[[kaynak]]
+ad = "masak"
+tip = "wordpress"
+etiket = "MASAK Duyurusu"
+api_url = "https://masak.hmb.gov.tr/portal/v2/posts"
+# FATF raporu, Hawala rehberi gibi duyuruların başlığında anahtar kelime geçmiyor ama hepsi yükümlüyü ilgilendirir.
+varsayilan_konular = ["MASAK / suç gelirleri / yaptırımlar"]
+
+[[kaynak]]
+# Site Next.js ama tarayıcı gerekmiyor: sitenin kendi JSON API'si kullanılıyor (sources/gib.py).
+ad = "gib_mevzuat"
+tip = "gib"
+etiket = "GİB Duyurusu"
+turler = [1]  # 1: Mevzuat. Diğerleri (sistem, sınav, …) şirketi ilgilendirmiyor.

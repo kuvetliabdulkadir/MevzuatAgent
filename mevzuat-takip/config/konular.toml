@@ -1,0 +1,96 @@
+# ⚠ SADECE İLK KURULUM TOHUMU (2026-10-03'ten beri): ilk çalışmada veritabanına bir kez aktarılır.
+#   Sonra konular panelden (Konular sayfası, kaydetmeden önce 90 günlük önizleme) yönetilir; bu dosyayı
+#   düzenlemek tek başına bir şey değiştirmez. Dosyayla değişiklik: `ayar-disa-aktar` → düzenle → `ayar-ice-aktar`.
+#
+# TASLAK — firmaya onaylatılmalı.
+#
+# Eşleşme kuralları (bkz. src/mevzuat/filtre.py):
+# - Büyük/küçük harf ve Türkçe İ/ı farkı yok sayılır, â/î/û sadeleştirilir.
+# - Kelime, bir kelimenin BAŞINDA geçmelidir ve ekleri kapsar: "altın" → "altının", "altınlar".
+# - Bu yüzden kısa kökler yanlış eşleşebilir ("harç" → "harcırah"). Kısa kök yerine ifade kullan.
+# - `haric`: metinde önce bu ifadeler (tam kelime) maskelenir, sonra eşleşme aranır.
+#   Kökle başlayan ama alakasız kelimeler: "altında" (under), "altıncı" (sixth), yer adları.
+# - `dislanan`: başlıkta bu ifade geçerse o konu hiç eşleşmez (ör. üniversite merkez yönetmelikleri).
+#
+# - `is_kollari`: bu konu hangi iş kollarını ilgilendiriyor. Raporda "Etkilenen" olarak görünür.
+#   Bilinenler: "Kuyum", "Döviz/Altın", "Oto kiralama", "Ortak" (tüm şirket / muhasebe).
+#   Yeni iş kolu = yeni bir ad yazmak; kod değişmez.
+#
+# Kaçırmak, gereksiz bildirimden daha pahalı: emin değilsen ekle, sorumlu kişi zaten onaylıyor.
+
+[[konu]]
+ad = "Kıymetli madenler ve kuyumculuk"
+is_kollari = ["Kuyum", "Döviz/Altın"]
+kelimeler = [
+    "altın", "kıymetli maden", "kıymetli taş", "kuyum", "ziynet", "gümüş", "platin",
+    "pırlanta", "elmas", "mücevher", "külçe", "darphane", "has altın", "işlenmiş altın",
+]
+haric = [
+    "altında", "altındaki", "altındadır", "altıncı",
+    # "altın"/"gümüş" ile başlayan yer adları (90 günlük testte "Altınkaya", "Gümüşhane" yakalandı)
+    "altınkaya", "altındağ", "altınordu", "altınova", "altıntaş", "altınözü", "altınyayla",
+    "altınekin", "altınoluk", "altınşehir", "gümüşhane", "gümüşhacıköy",
+]
+
+[[konu]]
+ad = "MASAK / suç gelirleri / yaptırımlar"
+is_kollari = ["Ortak"]
+kelimeler = [
+    "masak", "mali suçları araştırma", "suç gelirleri", "aklanması", "aklama",
+    "terörün finansman", "kitle imha silahlarının yayılmasının finansman",
+    "malvarlığının dondurulması", "malvarlığı dondur", "yaptırım listesi",
+    "şüpheli işlem", "uyum görevlisi", "müşterini tanı", "kimlik tespit",
+]
+
+[[konu]]
+ad = "Vergi"
+is_kollari = ["Ortak"]
+kelimeler = [
+    "vergi usul", "katma değer vergisi", "kdv", "özel tüketim vergisi", "ötv",
+    "gelir vergisi", "kurumlar vergisi", "damga vergisi", "harçlar kanunu",
+    "yeniden değerleme", "e-fatura", "e-arşiv", "e-defter", "elektronik belge",
+    "gelir idaresi", "vergi kanun",
+]
+
+[[konu]]
+ad = "Ticaret, kambiyo, tüketici"
+is_kollari = ["Ortak"]
+kelimeler = [
+    "ithalat", "ihracat", "gümrük",
+    "tüketicinin korunması", "tüketici", "fiyat etiket", "mesafeli sözleşme",
+    "türk ticaret kanunu", "ticaret sicil", "ölçüler ve ayar", "ayar damga",
+]
+
+[[konu]]
+ad = "Döviz ve kambiyo"
+is_kollari = ["Döviz/Altın"]
+kelimeler = [
+    "türk parasının kıymetini koruma", "kambiyo", "döviz", "yetkili müessese",
+    "merkez bankası", "efektif",
+]
+haric = ["döviz kazandırıcı"]
+# TCMB'nin kendi iç personel yönetmelikleri (90 günlük testte yakalandı)
+dislanan = ["disiplin yönetmeliği", "performans değerlendirme yönetmeliği", "personel yönetmeliği"]
+
+[[konu]]
+ad = "Araç kiralama ve taşıtlar"
+is_kollari = ["Oto kiralama"]
+kelimeler = [
+    "araç kiralama", "kiralık araç", "rent a car", "motorlu taşıt", "taşıt", "otomobil",
+    "karayolları trafik", "karayolu trafik", "trafik sigorta", "zorunlu mali sorumluluk",
+    "kiralanması", "araç muayene", "plaka", "sürücü belgesi", "akaryakıt", "benzin", "motorin",
+]
+
+[[konu]]
+ad = "Çalışma hayatı ve SGK"
+is_kollari = ["Ortak"]
+kelimeler = [
+    "iş kanunu", "asgari ücret", "sosyal sigorta", "iş sağlığı ve güvenliği",
+    "kıdem tazminat", "sosyal güvenlik", "çalışma izni",
+]
+dislanan = ["üniversitesi", "uygulama ve araştırma merkezi", "personeli görevde yükselme"]
+
+[[konu]]
+ad = "Kişisel veriler"
+is_kollari = ["Ortak"]
+kelimeler = ["kişisel veri"]

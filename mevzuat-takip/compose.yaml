@@ -1,0 +1,99 @@
+# Mevzuat Takip — Docker Compose ile tek komutla: veritabanı + panel + zamanlayıcı.
+#
+#   docker compose up -d --build        başlat (ilk seferde imajı derler)
+#   docker compose ps                   durum
+#   docker compose logs -f panel        loglar
+#   docker compose down                 durdur (veriler pgdata biriminde kalır)
+#
+# Ayrıntı ve demo komutları: deploy/DOCKER.md
+# Gerekli: proje klasöründe .env (bkz. .env.example), içinde MEVZUAT_DB_SIFRE ve MEVZUAT_GIZLI_ANAHTAR.
+# Başka bir ayar dosyası için: MEVZUAT_ENV_DOSYASI=demo.env docker compose up -d
+
+name: mevzuat
+
+# Panel ve zamanlayıcı aynı imajı ve aynı ayarları kullanır.
+x-uygulama: &uygulama
+  build: .
+  image: mevzuat:latest
+  env_file: ${MEVZUAT_ENV_DOSYASI:-.env}
+  environment: &ortam
+    # .env'deki değerler yerine container'a uygun olanlar (environment, env_file'dan önceliklidir).
+    MEVZUAT_DB_URL: postgresql+psycopg://mevzuat:${MEVZUAT_DB_SIFRE:?.env içinde MEVZUAT_DB_SIFRE tanımlayın}@db:5432/mevzuat
+    MEVZUAT_KONULAR: config/konular.toml
+    MEVZUAT_KAYNAKLAR: config/kaynaklar.toml
+    MEVZUAT_IZLENEN: config/izlenen_mevzuat.toml
+    MEVZUAT_TESSERACT: ""   # Windows yolları container'da geçersiz: sistemdeki tesseract kullanılır
+    MEVZUAT_TESSDATA: ""
+  volumes:
+    # Ayarlar imaja gömülü değil, buradan okunur. Kaynak/konu toml'ları sadece ilk kurulum tohumu (sonra DB'de;
+    # değişiklik: ayar-ice-aktar). izlenen_mevzuat.toml her çalışmada buradan okunur.
+    - ./config:/app/config:ro
+    - giden_mailler:/app/giden_mailler
+  depends_on:
+    db:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_USER: mevzuat
+      POSTGRES_DB: mevzuat
+      POSTGRES_PASSWORD: ${MEVZUAT_DB_SIFRE:?.env içinde MEVZUAT_DB_SIFRE tanımlayın}
+      TZ: Europe/Istanbul
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mevzuat -d mevzuat"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    # Port dışarı açılmaz: veritabanına sadece compose ağındaki panel ve zamanlayıcı erişir.
+
+  panel:
+    <<: *uygulama
+    environment:
+      <<: *ortam
+      # Önünde HTTPS'li vekil (Caddy) varsa (MEVZUAT_HTTPS=1) vekil container dışından gelir.
+      # Port sadece 127.0.0.1'e açık olduğundan buna yalnız bu makinedeki vekil ulaşabilir.
+      MEVZUAT_VEKIL_IPLERI: "*"
+    ports:
+      - "127.0.0.1:${MEVZUAT_PANEL_PORT:-8000}:8000"   # sadece bu makineden; şirket ağına HTTPS'li vekil ile açılır
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/saglik', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  zamanlayici:
+    <<: *uygulama
+    # Paneldeki tarama saatlerinde (varsayılan 06:30, 18:00, Türkiye saati) günlük işi çalıştırır.
+    # Saatler panelden değişir (MEVZUAT_CALISMA_SAATLERI sadece ilk değer).
+    command: ["python", "-m", "mevzuat.cli", "zamanlayici"]
+
+  yedek:
+    # Gecelik veritabanı yedeği: açılışta bir kez, sonra her gece
+    # 03:00'te deploy/yedek.sh. Yedekler bu klasördeki ./yedekler'e yazılır, 30 gün saklanır. Sunucu dışına kopyalayın.
+    image: postgres:16-bookworm
+    environment:
+      PGHOST: db
+      PGUSER: mevzuat
+      PGDATABASE: mevzuat
+      PGPASSWORD: ${MEVZUAT_DB_SIFRE:?.env içinde MEVZUAT_DB_SIFRE tanımlayın}
+      TZ: Europe/Istanbul
+      MEVZUAT_YEDEK_KLASORU: /yedekler
+      MEVZUAT_YEDEK_SAATI: ${MEVZUAT_YEDEK_SAATI:-03:00}
+    volumes:
+      - ./deploy:/deploy:ro
+      - ./yedekler:/yedekler
+    command: ["sh", "/deploy/yedek-docker.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  giden_mailler:

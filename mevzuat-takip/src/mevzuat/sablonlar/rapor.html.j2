@@ -1,0 +1,150 @@
+{# Bu dosya rapor mailinin HTML, yani biçimli hali. Bir Jinja şablonu. Çift süslü parantez içindeki değer maile yazılır ve otomatik olarak güvenli hale getirilir, #}
+{# yüzde işaretli parantezler koşul ve döngüdür, bu satırlar gibi diyezli parantezler ise açıklamadır ve maile girmez. #}
+<!DOCTYPE html>
+<html lang="tr">
+<head><meta charset="utf-8"><title>{{ konu }}</title></head>
+{# Mail istemcileri <style> bloklarını güvenilir desteklemez, stiller satır içi, düzen tablo ile. #}
+<body style="margin:0;padding:0;background:#f4f4f2;font-family:Arial,Helvetica,sans-serif;color:#1f2328;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f2;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:720px;background:#ffffff;border:1px solid #dcdcd6;">
+
+  {# Üst kısım, başlık ve kısa açıklama. #}
+  <tr><td style="padding:24px 28px 8px;">
+    <div style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#6b6b63;">Mevzuat Takip Raporu</div>
+    <h1 style="margin:6px 0 4px;font-size:22px;line-height:1.3;">{{ tarih.strftime("%d.%m.%Y") }} — {{ kalemler|length }} kalem</h1>
+    <p style="margin:0;font-size:14px;color:#4a4a44;">Takip edilen kaynaklarda şirketi ilgilendiren yeni yayımlar aşağıdadır. Her kalemin altında resmî kaynakçası vardır.</p>
+  </td></tr>
+
+  {% if onay %}
+  {# Sadece onaylayıcıya giden bildirimde. Raporun içeriği linksizdir, tek link panelin kendi adresi. #}
+  <tr><td style="padding:12px 28px 0;">
+    <div style="border:2px solid #c27c0e;background:#fdf6e9;padding:12px 14px;font-size:14px;line-height:1.5;">
+      <strong>Onayınızı bekliyor — Rapor #{{ onay.rapor_id }}</strong><br>
+      Bu rapor henüz kimseye gönderilmedi. Aşağıda ve ekteki PDF belgelerde, onaylarsanız alıcılara
+      gidecek hâli var. Onaylamak, kalem çıkarmak veya reddetmek için onay paneline giriş yapın.
+      {% if onay.link %}
+      <div style="margin-top:12px;"><a href="{{ onay.link }}" style="display:inline-block;background:#2f5d8a;color:#ffffff;text-decoration:none;font-weight:bold;padding:10px 18px;border-radius:4px;">Onay paneline git</a></div>
+      <div style="margin-top:6px;font-size:12px;color:#6b6b63;">{{ onay.link }} — panele giriş yapmanız istenir. Parolanızı yalnızca bu adreste girin.</div>
+      {% endif %}
+    </div>
+  </td></tr>
+  {% endif %}
+
+  {# Onaylayan not yazdıysa. #}
+  {% if sorumlu_notu %}
+  <tr><td style="padding:12px 28px 0;">
+    <div style="border-left:4px solid #2f5d8a;background:#eef3f8;padding:10px 12px;font-size:14px;line-height:1.5;white-space:pre-wrap;"><strong>Sorumlunun notu:</strong> {{ sorumlu_notu }}</div>
+  </td></tr>
+  {% endif %}
+
+  {# OCR ile okunmuş kalem varsa uyarı kutusu. #}
+  {% if kalemler|selectattr("ocr")|list %}
+  <tr><td style="padding:12px 28px 0;">
+    <div style="border-left:4px solid #c27c0e;background:#fdf6e9;padding:10px 12px;font-size:13px;line-height:1.5;">
+      <strong>Dikkat:</strong> Bazı belgeler taranmış görüntüdür; özetleri bilgisayarla okunmuştur.
+      Rakam, liste numarası ve özellikle kişi/kuruluş adlarında hata olabilir. Dayanak olarak her zaman
+      ekteki orijinal belgeyi kullanın.
+    </div>
+  </td></tr>
+  {% endif %}
+
+  {# İş koluna göre kalem listesi. #}
+  <tr><td style="padding:20px 28px 4px;">
+    <h2 style="margin:0 0 8px;font-size:15px;">İş koluna göre</h2>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;line-height:1.5;">
+      {% for is_kolu, liste in is_kollari.items() %}
+      <tr>
+        <td valign="top" style="padding:4px 12px 4px 0;white-space:nowrap;font-weight:bold;width:1%;">{{ is_kolu }}</td>
+        <td valign="top" style="padding:4px 0;color:#4a4a44;">
+          {% for k in liste %}<div>{{ k.no }}. {{ k.kayit.baslik|truncate(110) }}</div>{% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </td></tr>
+
+  {# Her kalem için bir bölüm. #}
+  {% for k in kalemler %}
+  <tr><td style="padding:16px 28px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e0;">
+      <tr><td style="padding-top:16px;">
+        <div style="font-size:12px;color:#6b6b63;">{{ k.no }} · {{ k.tur_adi }} · {{ k.kayit.yayin_tarihi.strftime("%d.%m.%Y") }}</div>
+        <h3 style="margin:4px 0 10px;font-size:16px;line-height:1.4;">{{ k.kayit.baslik }}</h3>
+
+        {# Metni değişen mevzuatta, madde madde eski/yeni. #}
+        {% if k.degisiklikler %}
+        <div style="font-size:13px;color:#6b6b63;margin-bottom:4px;">Güncel metindeki değişiklikler (değişen kısım «» içinde):</div>
+        {% for d in k.degisiklikler %}
+        <div style="margin-top:6px;font-size:13px;line-height:1.5;">
+          <strong>{{ d.bolum }}</strong> — {{ d.tur }}
+          {% if d.eski %}<div style="margin-left:10px;color:#8a2b1d;">Eski: {{ d.eski }}</div>{% endif %}
+          {% if d.yeni %}<div style="margin-left:10px;color:#1d5c2e;">Yeni: {{ d.yeni }}</div>{% endif %}
+        </div>
+        {% endfor %}
+        {% endif %}
+        {# Özet, özet tablosu ve OCR/okunamadı notları. #}
+        {% if k.ozet %}
+        <div style="font-size:14px;line-height:1.55;">{{ k.ozet }}</div>
+        {% if k.ozet_tablosu %}
+        <div style="margin-top:6px;padding:8px 10px;background:#f7f7f4;border:1px solid #e6e6e0;font-size:12px;line-height:1.5;white-space:pre-wrap;font-family:Consolas,Menlo,monospace;">{{ k.ozet_tablosu|join("\n") }}</div>
+        {% endif %}
+        {% if k.ocr %}<div style="margin-top:4px;font-size:12px;color:#a1650a;">Taranmış belgeden otomatik okundu — rakam ve numaraları ekteki belgeden doğrulayın.</div>{% endif %}
+        {% elif k.kayit.icerik_durumu == "OCR_GEREKLI" %}
+        <div style="font-size:13px;color:#a1650a;">Belge taranmış görüntüdür, metni okunamadı. Ekteki orijinal belgeye bakın.</div>
+        {% elif k.kayit.icerik_durumu == "HATA" %}
+        <div style="font-size:13px;color:#a1650a;">Belgenin içeriği alınamadı. Kaynakçadaki bilgilerle belgeye ulaşın.</div>
+        {% endif %}
+
+        {# Yürürlük, etkilenen iş kolları, neden size geldi. #}
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:10px;font-size:13px;line-height:1.5;">
+          {% if k.yururluk %}<tr><td valign="top" style="padding:2px 12px 2px 0;color:#6b6b63;white-space:nowrap;">Yürürlük</td><td style="padding:2px 0;">{{ k.yururluk }}</td></tr>{% endif %}
+          <tr><td valign="top" style="padding:2px 12px 2px 0;color:#6b6b63;white-space:nowrap;">Etkilenen</td><td style="padding:2px 0;"><strong>{{ k.kayit.is_kollari|join(", ") }}</strong></td></tr>
+          <tr><td valign="top" style="padding:2px 12px 2px 0;color:#6b6b63;white-space:nowrap;">Neden size geldi</td><td style="padding:2px 0;">{% for konu, kelimeler in k.kayit.eslesmeler.items() %}{{ konu }} ({{ kelimeler|join(", ") }}){% if not loop.last %}; {% endif %}{% endfor %}</td></tr>
+          {# Konunun açıklaması, bu konu bizi neden ilgilendiriyor. #}
+          {% for konu, aciklama in k.nedenler %}
+          <tr><td valign="top" style="padding:2px 12px 2px 0;color:#6b6b63;white-space:nowrap;">{% if loop.first %}Neden önemli{% endif %}</td><td style="padding:2px 0;color:#3d3d38;">{% if k.kayit.eslesmeler|length > 1 %}<strong>{{ konu }}:</strong> {% endif %}{{ aciklama|replace("\n", "<br>"|safe) }}</td></tr>
+          {% endfor %}
+        </table>
+
+        {# Öne çıkan cümleler. #}
+        {% if k.one_cikanlar %}
+        <div style="margin-top:8px;font-size:13px;line-height:1.55;color:#33332e;">
+          {% for c in k.one_cikanlar %}<div style="margin:2px 0 0 0;">• {{ c }}</div>{% endfor %}
+        </div>
+        {% endif %}
+
+        {# Kaynakça ve ek dosya adı. #}
+        <div style="margin-top:10px;font-size:12px;line-height:1.5;color:#4a4a44;">
+          <strong>Kaynakça:</strong> {{ k.kaynakca }}
+          {% if k.ek_adi %}<br><strong>Ek:</strong> {{ k.ek_adi }} (tam metin){% endif %}
+        </div>
+      </td></tr>
+    </table>
+  </td></tr>
+  {% endfor %}
+
+  {# Alt kısım, eklenemeyen belgelerin linkleri, (onay mailinde) panel düğmesi, otomatik hazırlandı notu. #}
+  <tr><td style="padding:20px 28px 24px;">
+    {% if eklenemeyen %}
+    <p style="margin:0 0 4px;font-size:12px;color:#a1650a;">Şu kalemlerin orijinal belgesi maile sığmadı veya indirilemedi; resmî kaynaktan açın:</p>
+    <ul style="margin:0 0 8px;padding-left:18px;font-size:12px;color:#a1650a;">
+      {% for e in eklenemeyen %}
+      <li>Kalem {{ e.no }}: {% if e.url %}<a href="{{ e.url }}" style="color:#2f5d8a;">{{ e.url }}</a>{% else %}kaynakçadan erişin{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if onay and onay.link %}
+    <p style="margin:0 0 12px;"><a href="{{ onay.link }}" style="display:inline-block;background:#2f5d8a;color:#ffffff;text-decoration:none;font-weight:bold;padding:10px 18px;border-radius:4px;">Onay paneline git</a></p>
+    {% endif %}
+    <p style="margin:0;font-size:11px;color:#8a8a82;border-top:1px solid #e6e6e0;padding-top:12px;">
+      Bu rapor Mevzuat Takip sistemi tarafından otomatik hazırlanmıştır. Seçim anahtar kelimelere göre yapılır;
+      listede olmayan bir düzenleme sizi yine de ilgilendirebilir.
+    </p>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>
