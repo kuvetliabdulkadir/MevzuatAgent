@@ -1,0 +1,167 @@
+# Güncel (konsolide) metni takip edilen mevzuat — mevzuat.gov.tr. Ayrıntı: src/mevzuat/surum.py
+#
+# Bu listedeki mevzuatın metni değişince (ör. ÖTV Kanunu'nun (I) sayılı listesindeki tutarlar),
+# eski ve yeni hali madde madde karşılaştırılıp "Değişen mevzuat" olarak onaya sunulur.
+# İlk çekim taban olur (rapor üretmez); değişiklikler ikinci çekimden itibaren yakalanır.
+#
+# Bu listede olmasa da "bugün güncellenenler"de çıkan ve adı konu filtresine takılan mevzuat otomatik takibe alınır.
+# Listeyi şirketle birlikte gözden geçirin. Numaraları mevzuat.gov.tr adresinden alın:
+#   mevzuat?MevzuatNo=4760&MevzuatTur=1&MevzuatTertip=5  →  no = 4760, tur = 1, tertip = 5
+# konu: config/konular.toml'daki konu adı (rapordaki "Etkilenen" iş kolları buradan gelir).
+# Numaralar 01.10.2026'da sitede tek tek doğrulandı.
+
+# false: güncel metin takibi tamamen kapanır (mevzuat.gov.tr'ye hiç gidilmez).
+aktif = true
+
+# --- Kıymetli madenler ve kuyumculuk ---
+[[mevzuat]]
+ad = "Kuyum Ticareti Hakkında Yönetmelik"
+tur = 7
+tertip = 5
+no = 38527
+konu = "Kıymetli madenler ve kuyumculuk"
+
+[[mevzuat]]
+ad = "Kıymetli Maden Standartları ve Rafinerileri Hakkında Tebliğ (2023/1)"
+tur = 9
+tertip = 5
+no = 40085
+konu = "Kıymetli madenler ve kuyumculuk"
+
+[[mevzuat]]
+ad = "Kıymetli Maden ve Kıymetli Taş Analizinde Yetki Verilecek Ayar Evleri Tebliği"
+tur = 9
+tertip = 5
+no = 39413
+konu = "Kıymetli madenler ve kuyumculuk"
+
+[[mevzuat]]
+ad = "Borsa İstanbul Kıymetli Madenler ve Kıymetli Taşlar Borsacılık Faaliyetleri Esasları Yönetmeliği"
+tur = 7
+tertip = 5
+no = 20151
+konu = "Kıymetli madenler ve kuyumculuk"
+
+# --- MASAK / suç gelirleri / yaptırımlar ---
+[[mevzuat]]
+ad = "Suç Gelirlerinin Aklanmasının Önlenmesi Hakkında Kanun (5549)"
+tur = 1
+tertip = 5
+no = 5549
+konu = "MASAK / suç gelirleri / yaptırımlar"
+
+[[mevzuat]]
+ad = "Suç Gelirlerinin Aklanmasının ve Terörün Finansmanının Önlenmesine Dair Tedbirler Hakkında Yönetmelik"
+tur = 21
+tertip = 5
+no = 200713012
+konu = "MASAK / suç gelirleri / yaptırımlar"
+
+[[mevzuat]]
+ad = "Terörizmin Finansmanının Önlenmesi Hakkında Kanun (6415)"
+tur = 1
+tertip = 5
+no = 6415
+konu = "MASAK / suç gelirleri / yaptırımlar"
+
+[[mevzuat]]
+ad = "Kitle İmha Silahlarının Yayılmasının Finansmanının Önlenmesine İlişkin Kanun (7262)"
+tur = 1
+tertip = 5
+no = 7262
+konu = "MASAK / suç gelirleri / yaptırımlar"
+
+# --- Döviz ve kambiyo ---
+[[mevzuat]]
+ad = "Türk Parasının Kıymetini Koruma Hakkında Kanun (1567)"
+tur = 1
+tertip = 3
+no = 1567
+konu = "Döviz ve kambiyo"
+
+[[mevzuat]]
+ad = "Türk Parası Kıymetini Koruma Hakkında 32 Sayılı Karar"
+tur = 20
+tertip = 5
+no = 8914391
+konu = "Döviz ve kambiyo"
+
+[[mevzuat]]
+ad = "32 Sayılı Karara İlişkin Tebliğ (2008-32/34)"
+tur = 9
+tertip = 5
+no = 11990
+konu = "Döviz ve kambiyo"
+
+[[mevzuat]]
+ad = "Firmaların Yurt Dışı Kaynaklı Dövizlerinin Türk Lirasına Dönüşümünün Desteklenmesi Hakkında Tebliğ (2023/5)"
+tur = 9
+tertip = 5
+no = 40039
+konu = "Döviz ve kambiyo"
+
+# --- Vergi ---
+[[mevzuat]]
+ad = "Özel Tüketim Vergisi Kanunu"
+tur = 1
+tertip = 5
+no = 4760
+konu = "Vergi"
+
+[[mevzuat]]
+ad = "Katma Değer Vergisi Kanunu"
+tur = 1
+tertip = 5
+no = 3065
+konu = "Vergi"
+
+[[mevzuat]]
+ad = "Vergi Usul Kanunu"
+tur = 1
+tertip = 4
+no = 213
+konu = "Vergi"
+
+[[mevzuat]]
+ad = "Gelir Vergisi Kanunu"
+tur = 1
+tertip = 4
+no = 193
+konu = "Vergi"
+
+[[mevzuat]]
+ad = "Kurumlar Vergisi Kanunu"
+tur = 1
+tertip = 5
+no = 5520
+konu = "Vergi"
+
+# --- Araç kiralama ve taşıtlar ---
+[[mevzuat]]
+ad = "Motorlu Kara Taşıtlarının Ticareti Hakkında Yönetmelik"
+tur = 7
+tertip = 5
+no = 40940
+konu = "Araç kiralama ve taşıtlar"
+
+# --- Ortak ---
+[[mevzuat]]
+ad = "Tüketicinin Korunması Hakkında Kanun"
+tur = 1
+tertip = 5
+no = 6502
+konu = "Ticaret, kambiyo, tüketici"
+
+[[mevzuat]]
+ad = "Kişisel Verilerin Korunması Kanunu"
+tur = 1
+tertip = 5
+no = 6698
+konu = "Kişisel veriler"
+
+[[mevzuat]]
+ad = "İş Kanunu"
+tur = 1
+tertip = 5
+no = 4857
+konu = "Çalışma hayatı ve SGK"

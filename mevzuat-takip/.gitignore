@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+mevzuat.db
+giden_mailler/
+rapor_onizleme.*
+mevzuat.lock
+docker_test_hesaplari.txt
+docs/
+disa_aktarim/
+.ruff_cache/
+yedekler/

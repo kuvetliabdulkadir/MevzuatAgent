@@ -1,0 +1,91 @@
+{# Bu dosya rapor mailinin düz metin hali, HTML gösteremeyen mail programları için. Bir Jinja şablonu. #}
+{# Çift süslü parantez içindeki değer maile yazılır, yüzde işaretli parantezler koşul ve döngüdür, bu satırlar gibi diyezli parantezler ise açıklamadır ve maile girmez. #}
+{# Onaylayıcıya giden mailse en üstte "onayınızı bekliyor" bölümü. #}
+{% if onay %}
+ONAYINIZI BEKLİYOR — Rapor #{{ onay.rapor_id }}
+Bu rapor henüz kimseye gönderilmedi. Aşağıda ve ekteki PDF belgelerde, onaylarsanız
+alıcılara gidecek hâli var. Onaylamak, kalem çıkarmak veya reddetmek için onay paneline
+giriş yapın.
+{% if onay.link %}
+Onay paneli: {{ onay.link }}
+(Panele giriş yapmanız istenir. Parolanızı yalnızca bu adreste girin.)
+{% endif %}
+
+{% endif %}
+{# Rapor başlığı. #}
+MEVZUAT TAKİP RAPORU — {{ tarih.strftime("%d.%m.%Y") }} — {{ kalemler|length }} kalem
+
+{# Onaylayan not yazdıysa. #}
+{% if sorumlu_notu %}
+SORUMLUNUN NOTU: {{ sorumlu_notu }}
+
+{% endif %}
+{# OCR ile okunmuş kalem varsa uyarı. #}
+{% if kalemler|selectattr("ocr")|list %}
+DİKKAT: Bazı belgeler taranmış görüntüdür; özetleri bilgisayarla okunmuştur.
+Rakam, liste numarası ve kişi/kuruluş adlarında hata olabilir. Ekteki orijinal belge esastır.
+
+{% endif %}
+{# İş koluna göre kalem numaraları. #}
+İŞ KOLUNA GÖRE
+{% for is_kolu, liste in is_kollari.items() %}
+  {{ is_kolu }}: {{ liste|map(attribute="no")|join(", ") }}
+{% endfor %}
+{# Her kalem, başlık, tür, tarih, (varsa) değişiklikler, özet, yürürlük, neden geldi, öne çıkanlar, kaynakça, ek. #}
+{% for k in kalemler %}
+
+----------------------------------------------------------------------
+{{ k.no }}. {{ k.kayit.baslik }}
+{{ k.tur_adi }} · {{ k.kayit.yayin_tarihi.strftime("%d.%m.%Y") }}
+
+{% if k.degisiklikler %}
+Güncel metindeki değişiklikler (değişen kısım «» içinde):
+{% for d in k.degisiklikler %}
+- {{ d.bolum }} — {{ d.tur }}
+{% if d.eski %}    Eski: {{ d.eski }}
+{% endif %}
+{% if d.yeni %}    Yeni: {{ d.yeni }}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if k.ozet %}
+{{ k.ozet }}
+{% if k.ozet_tablosu %}
+{% for satir in k.ozet_tablosu %}
+    {{ satir }}
+{% endfor %}
+{% endif %}
+{% if k.ocr %}(Taranmış belgeden otomatik okundu — rakam ve numaraları ekteki belgeden doğrulayın.)
+{% endif %}
+{% elif k.kayit.icerik_durumu == "OCR_GEREKLI" %}
+Belge taranmış görüntüdür, metni okunamadı. Ekteki orijinal belgeye bakın.
+{% elif k.kayit.icerik_durumu == "HATA" %}
+Belgenin içeriği alınamadı. Kaynakçadaki bilgilerle belgeye ulaşın.
+{% endif %}
+
+{% if k.yururluk %}
+Yürürlük: {{ k.yururluk }}
+{% endif %}
+Etkilenen: {{ k.kayit.is_kollari|join(", ") }}
+Neden size geldi: {% for konu, kelimeler in k.kayit.eslesmeler.items() %}{{ konu }} ({{ kelimeler|join(", ") }}){% if not loop.last %}; {% endif %}{% endfor %}
+{# Satır sonu döngünün içinde, açıklama yoksa çıktı eskisiyle birebir aynı kalır. #}
+{% for konu, aciklama in k.nedenler %}
+
+Neden önemli{% if k.kayit.eslesmeler|length > 1 %} ({{ konu }}){% endif %}: {{ aciklama }}{% endfor %}
+
+{% for c in k.one_cikanlar %}
+  • {{ c }}
+{% endfor %}
+Kaynakça: {{ k.kaynakca }}
+{% if k.ek_adi %}
+Ek: {{ k.ek_adi }} (tam metin)
+{% endif %}
+{% endfor %}
+{# Maile eklenemeyen belgelerin resmî kaynak adresleri. #}
+{% if eklenemeyen %}
+
+Orijinal belgesi maile sığmayan veya indirilemeyen kalemler (resmî kaynaktan açın):
+{% for e in eklenemeyen %}
+  Kalem {{ e.no }}: {{ e.url or "kaynakçadan erişin" }}
+{% endfor %}
+{% endif %}
