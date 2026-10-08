@@ -131,7 +131,7 @@ YENI = {"tip": "wordpress", "etiket": "BDDK Duyurusu",
 def test_liste_durumla_gelir(ortam):
     client, _ = ortam
     liste = {k["ad"]: k for k in client.get("/api/kaynaklar").json()["kaynaklar"]}
-    assert list(liste) == ["resmi_gazete", "masak", "gib_mevzuat"]
+    assert list(liste) == ["resmi_gazete", "masak", "gib_mevzuat", "mevzuat_gov_yeni"]
     assert liste["masak"]["checkpoint"] == "2026-10-02T06:30:00" and liste["masak"]["toplam_kayit"] == 3
     assert liste["masak"]["ilgili_kayit"] == 1 and liste["masak"]["son_hata"] is None
     assert liste["gib_mevzuat"]["son_hata"] == "ConnectError('kapalı')"
@@ -187,7 +187,7 @@ def test_hatali_kaynak_kaydedilmez(ortam, degisiklik, hata):
     cevap = _istek(client, "post", "/api/kaynaklar", {**YENI, **degisiklik})
     assert cevap.status_code == 400 and hata in cevap.json()["detail"]
     with Session(engine) as s:
-        assert len(s.scalars(select(KaynakTanimi)).all()) == 3
+        assert len(s.scalars(select(KaynakTanimi)).all()) == 4
 
 
 def test_rg_duzenlenebilir_ad_ve_tip_degismez(ortam):
@@ -225,7 +225,7 @@ def test_dene_kaydetmeden_tarar_eslesmeleri_gosterir(ortam, monkeypatch):
     assert any(k["eslesen"] for k in sonuc["kayitlar"])  # MASAK duyurularında ★ çıkar
     assert istekler[0].url.host == "www.bddk.org.tr"
     with Session(engine) as s:
-        assert len(s.scalars(select(KaynakTanimi)).all()) == 3  # hiçbir şey yazılmadı
+        assert len(s.scalars(select(KaynakTanimi)).all()) == 4  # hiçbir şey yazılmadı
         assert len(s.scalars(select(Kayit)).all()) == 3
 
 

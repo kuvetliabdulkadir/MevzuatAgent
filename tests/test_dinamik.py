@@ -79,7 +79,7 @@ def test_hatali_ayar_en_basta_hata_verir(tmp_path, icerik, mesaj):
 
 def test_gercek_ayar_dosyalari_yuklenir():
     kaynaklar = kaynaklari_yukle(ROOT / "config" / "kaynaklar.toml")
-    assert {k.ad for k in kaynaklar} == {"resmi_gazete", "masak", "gib_mevzuat"}
+    assert {k.ad for k in kaynaklar} == {"resmi_gazete", "masak", "gib_mevzuat", "mevzuat_gov_yeni"}
     konular = konulari_yukle(ROOT / "config" / "konular.toml")
     assert {ik for k in konular for ik in k.is_kollari} == {"Kuyum", "Döviz/Altın", "Oto kiralama", "Ortak"}
 

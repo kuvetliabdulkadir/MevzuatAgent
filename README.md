@@ -1,7 +1,7 @@
 # Mevzuat Takip Ajanı
 
 Resmî kaynaklarda yayımlanan mevzuatı ve duyuruları her gün otomatik toplayan, firmayı ilgilendirenleri seçen,
-belgelerin içeriğini okuyup linksiz bir rapor hazırlayan ve **bir sorumlunun onayından sonra** raporu ilgili ekiplere
+belgelerin içeriğini okuyup her kalemin altında resmî kaynak linki olan bir rapor hazırlayan ve **bir sorumlunun onayından sonra** raporu ilgili ekiplere
 mail ile dağıtan sistem.
 
 Bir kuyumculuk firmasında staj projesi olarak geliştirildi (Ekim 2026). İş kolları: **Kuyum, Döviz/Altın, Oto kiralama** ve hepsini ilgilendiren **Ortak**.

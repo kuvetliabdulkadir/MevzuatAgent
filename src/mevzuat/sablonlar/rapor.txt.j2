@@ -77,6 +77,9 @@ Neden önemli{% if k.kayit.eslesmeler|length > 1 %} ({{ konu }}){% endif %}: {{ 
   • {{ c }}
 {% endfor %}
 Kaynakça: {{ k.kaynakca }}
+{% if k.kaynak_linki %}
+Kaynak: {{ k.kaynak_linki }}
+{% endif %}
 {% if k.ek_adi %}
 Ek: {{ k.ek_adi }} (tam metin)
 {% endif %}

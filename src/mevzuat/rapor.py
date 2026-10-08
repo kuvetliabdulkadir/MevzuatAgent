@@ -65,6 +65,8 @@ class RaporKalemi:
     degisiklikler: list[dict] | None = None
     # "Neden önemli" satırları, [(konu, açıklama)], rapor_olustur doldurur.
     nedenler: list[tuple[str, str]] = field(default_factory=list)
+    # Belgenin resmî kaynaktaki adresi (sadece http ve https), rapor_olustur doldurur.
+    kaynak_linki: str | None = None
 
 
 # RG alt başlıkları büyük harf ve çoğul ("CUMHURBAŞKANI KARARLARI"), raporda tekil ve okunur ad.
@@ -323,9 +325,9 @@ def one_cikanlar(metin: str, eslesmeler: dict[str, list[str]], haric: tuple[str,
 URL = re.compile(r"(https?://|www\.)\S+", re.IGNORECASE)
 
 
-# Metindeki bütün adresleri "[bağlantı kaldırıldı]" yapar (rapor kararı, mailde link yok).
+# Metindeki bütün adresleri "[bağlantı kaldırıldı]" yapar. Mailde tek link her kalemin resmî kaynak adresidir.
 def linksiz(metin: str) -> str:
-    # Karar, mailde link yok. Gmail/Outlook düz metindeki adresleri de tıklanabilir yapar.
+    # Metnin içindeki adresler silinir, Gmail/Outlook düz metindeki adresleri de tıklanabilir yapar.
     return URL.sub("[bağlantı kaldırıldı]", metin)
 
 
@@ -383,9 +385,9 @@ def _ek_indir(client: httpx.Client, kalem: RaporKalemi, onbellek: dict[str, byte
     return Ek(ad, onbellek[url], "application/pdf")
 
 
-# Maile eklenemeyen belge için resmî kaynağın adresi (raporda tek istisna link).
+# Belgenin resmî kaynaktaki adresi, her kalemin altında ve maile eklenemeyen belgeler listesinde.
 def _belge_linki(kalem: RaporKalemi) -> dict:
-    """Eklenemeyen belge için tek istisna olarak link konur, belgenin resmî kaynaktaki adresi. Rapor içeriği yine linksizdir.
+    """Belgenin resmî kaynaktaki adresi. Rapor metninin içindeki adresler yine silinir.
     Sadece http ve https kabul edilir, javascript gibi başka şemalar maile konmaz."""
     url = kalem.kayit.url
     return {"no": kalem.no, "url": url if urlparse(url).scheme in ("http", "https") else None}
@@ -420,6 +422,7 @@ def rapor_olustur(
     linksiz_aciklamalar = {ad: linksiz(a) for ad, a in (aciklamalar or {}).items()}
     for kalem in kalemler:
         kalem.nedenler = neden_onemli(kalem.kayit, linksiz_aciklamalar)
+        kalem.kaynak_linki = _belge_linki(kalem)["url"]
 
     ekler: list[Ek] = []
     eklenemeyen: list[dict] = []  # [{no, url}], maile sığmayan/indirilemeyen belge, yerine resmî kaynağın linki
@@ -567,18 +570,34 @@ def onaya_sun(
 
 # Onay anında dağıtım planını (kim hangi kalemleri alacak) gonderimler tablosuna yazar.
 def _plani_kaydet(
-    session: Session, rapor: Rapor, kayitlar: list[Kayit], gruplar: list, ek_adresler: list[str]
+    session: Session, rapor: Rapor, kayitlar: list[Kayit], gruplar: list, ek_adresler: list[str], notu: str | None
 ) -> list[Gonderim]:
     """Dağıtım planını (kim hangi kalemleri alacak) onay anında dondurur. Sonradan grup değişse de
-    onaylanmış rapor, onaylayıcının panelde gördüğü ve seçtiği gibi gider. Commit etmez."""
+    onaylanmış rapor, onaylayıcının panelde gördüğü ve seçtiği gibi gider. Ek gönderim de aynı yoldan geçer,
+    raporun alıcı listesi büyür. Commit etmez."""
     plan = alicilar.dagitim_plani(gruplar, kayitlar, ek_adresler)
     yeni = [
-        Gonderim(rapor_id=rapor.id, alicilar=m.alicilar, kayit_idler=m.kayit_idler, gruplar=m.gruplar, durum="BEKLIYOR")
+        Gonderim(rapor_id=rapor.id, alicilar=m.alicilar, kayit_idler=m.kayit_idler, gruplar=m.gruplar, durum="BEKLIYOR",
+                 notu=notu)
         for m in plan
     ]
     session.add_all(yeni)
-    rapor.alicilar = sorted({a for m in plan for a in m.alicilar})
+    rapor.alicilar = sorted(set(rapor.alicilar or []) | {a for m in plan for a in m.alicilar})
     return yeni
+
+
+# Seçilen grupları ve adresleri doğrular, seçilen kalemler kimseye gitmiyorsa hata verir.
+def _alicilari_dogrula(
+    session: Session, dahil: list[Kayit], grup_idler: set[int] | None, ek_adresler: list[str]
+) -> tuple[list, list[str]]:
+    gruplar = alicilar.aktif_gruplar(session) if grup_idler is None else alicilar.secilen_gruplar(session, grup_idler)
+    ek, hatali = alicilar.adresleri_ayikla("\n".join(ek_adresler))
+    if hatali:
+        raise ValueError(f"Geçersiz e-posta adresi: {', '.join(hatali)}")
+    if not alicilar.dagitim_plani(gruplar, dahil, ek):
+        raise ValueError("Seçilen kalemler hiçbir alıcı grubuna gitmiyor ve kişiye özel adres eklenmedi. "
+                         "Grup seçin ya da adres ekleyin.")
+    return gruplar, ek
 
 
 # Panelden gelen onay ya da ret kararını işler.
@@ -606,13 +625,7 @@ def karar_ver(
     if onay:
         if not dahil:
             raise ValueError("En az bir kalem seçilmeli. Hiçbiri gönderilmeyecekse raporu reddedin.")
-        gruplar = alicilar.aktif_gruplar(session) if grup_idler is None else alicilar.secilen_gruplar(session, grup_idler)
-        ek, hatali = alicilar.adresleri_ayikla("\n".join(ek_adresler))
-        if hatali:
-            raise ValueError(f"Geçersiz e-posta adresi: {', '.join(hatali)}")
-        if not alicilar.dagitim_plani(gruplar, dahil, ek):
-            raise ValueError("Seçilen kalemler hiçbir alıcı grubuna gitmiyor ve kişiye özel adres eklenmedi. "
-                             "Grup seçin, adres ekleyin ya da raporu reddedin.")
+        gruplar, ek = _alicilari_dogrula(session, dahil, grup_idler, ek_adresler)
 
     # Koşullu güncelleme, iki kişi aynı anda karar verirse sadece biri başarılı olur,
     # rapor iki kez dağıtılmaz.
@@ -635,7 +648,39 @@ def karar_ver(
         for kayit in kayitlar:
             kayit.haric = kayit.id not in dahil_idler
         rapor.konu = rapor_konusu(dahil, rapor.olusturuldu.date())
-        _plani_kaydet(session, rapor, dahil, gruplar, ek)  # onayla aynı commit'te, onaylı ama plansız rapor kalmaz
+        _plani_kaydet(session, rapor, dahil, gruplar, ek, notu)  # onayla aynı commit'te, onaylı ama plansız rapor kalmaz
+    session.commit()
+    session.refresh(rapor)
+
+
+# Onaylanmış rapordan başka kalemleri başka kişilere gönderir, ilk onayda seçilmeyen kalemler de seçilebilir.
+def ek_gonderim_planla(
+    session: Session,
+    rapor: Rapor,
+    dahil_idler: set[int],
+    notu: str | None,
+    grup_idler: set[int],
+    ek_adresler: list[str] = (),
+) -> None:
+    """Onaylanmış ya da gönderilmiş rapora yeni dağıtım mailleri ekler, mailleri sonra `dagit` gönderir.
+    Seçilen kalemler artık hariç sayılmaz. Gönderilmiş rapor tekrar ONAYLANDI olur, mailler gidince yine GONDERILDI olur."""
+    notu = (notu or "").strip() or None
+    kayitlar = rapor_kayitlari(session, rapor)
+    dahil = [k for k in kayitlar if k.id in dahil_idler]
+    if not dahil:
+        raise ValueError("En az bir kalem seçilmeli.")
+    gruplar, ek = _alicilari_dogrula(session, dahil, grup_idler, ek_adresler)
+    # Koşullu güncelleme, rapor bu arada başka bir duruma geçtiyse ek gönderim yapılmaz.
+    sonuc = session.execute(
+        update(Rapor).where(Rapor.id == rapor.id, Rapor.durum.in_(("ONAYLANDI", "GONDERILDI"))).values(durum="ONAYLANDI")
+    )
+    if sonuc.rowcount != 1:
+        session.rollback()
+        raise DurumHatasi("Sadece onaylanmış raporlardan ek gönderim yapılabilir.")
+    for kayit in dahil:
+        kayit.haric = False
+    rapor.konu = rapor_konusu([k for k in kayitlar if not k.haric], rapor.olusturuldu.date())
+    _plani_kaydet(session, rapor, dahil, gruplar, ek, notu)
     session.commit()
     session.refresh(rapor)
 
@@ -655,18 +700,18 @@ def _gonderimi_yap(
     kayitlar: dict[int, Kayit],
     ek_ekle: bool,
     ek_onbellek: dict[str, bytes],
-    mail_onbellek: dict[tuple[int, ...], Mail],
+    mail_onbellek: dict[tuple, Mail],
 ) -> bool | None:
     """Tek bir dağıtım maili gönderir. Mail gittiyse True döner. Gitmediyse False döner, hata yazılır ve sonra tekrar denenir.
     Başka bir süreç bu maili sahiplendiyse None döner, maili o gönderecek."""
     # Mail sahiplenmeden ÖNCE hazırlanır, hazırlarken hata çıkarsa gönderim BEKLIYOR'da kalır.
-    # Aynı kalemleri alan kişilerin maili bir kez hazırlanır (kişi başı ayrı mail, içerik aynı).
-    anahtar = tuple(gonderim.kayit_idler)
+    # Aynı kalemleri ve aynı notu alan kişilerin maili bir kez hazırlanır (kişi başı ayrı mail, içerik aynı).
+    anahtar = (tuple(gonderim.kayit_idler), gonderim.notu)
     if anahtar not in mail_onbellek:
         try:
             secilen = [kayitlar[i] for i in gonderim.kayit_idler]
             mail_onbellek[anahtar] = rapor_olustur(secilen, rapor.olusturuldu.date(), client, ek_ekle,
-                                                   sorumlu_notu=rapor.karar_notu, ek_onbellek=ek_onbellek,
+                                                   sorumlu_notu=gonderim.notu, ek_onbellek=ek_onbellek,
                                                    aciklamalar=konu_aciklamalari(session))
         except Exception as e:
             log.exception("Dağıtım maili hazırlanamadı")
@@ -757,7 +802,8 @@ def dagit(
     # Planı olmayan eski rapor, şimdiki gruplarla plan çıkar.
     if not gonderimler(session, rapor):
         # Alıcı grupları gelmeden (eski sürümde) onaylanmış rapor, şimdiki gruplarla planla.
-        _plani_kaydet(session, rapor, [k for k in kayitlar.values() if not k.haric], alicilar.aktif_gruplar(session), [])
+        _plani_kaydet(session, rapor, [k for k in kayitlar.values() if not k.haric], alicilar.aktif_gruplar(session), [],
+                      rapor.karar_notu)
         session.commit()
         if not gonderimler(session, rapor):
             rapor.hata = "Hiçbir alıcı grubu bu raporun kalemlerini almıyor; panelden alıcı grubu tanımlayın."
@@ -766,7 +812,7 @@ def dagit(
 
     # Aynı PDF'ler ve aynı içerikli mailler bir kez hazırlansın diye önbellekler.
     ek_onbellek: dict[str, bytes] = {}
-    mail_onbellek: dict[tuple[int, ...], Mail] = {}
+    mail_onbellek: dict[tuple, Mail] = {}
     hatalar = []
     # BEKLIYOR durumundaki her maili gönder, gidemeyenleri hata listesine yaz.
     for gonderim in [g for g in gonderimler(session, rapor) if g.durum == "BEKLIYOR"]:

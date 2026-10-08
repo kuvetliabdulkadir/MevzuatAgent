@@ -13,11 +13,11 @@
   <tr><td style="padding:24px 28px 8px;">
     <div style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#6b6b63;">Mevzuat Takip Raporu</div>
     <h1 style="margin:6px 0 4px;font-size:22px;line-height:1.3;">{{ tarih.strftime("%d.%m.%Y") }} — {{ kalemler|length }} kalem</h1>
-    <p style="margin:0;font-size:14px;color:#4a4a44;">Takip edilen kaynaklarda şirketi ilgilendiren yeni yayımlar aşağıdadır. Her kalemin altında resmî kaynakçası vardır.</p>
+    <p style="margin:0;font-size:14px;color:#4a4a44;">Takip edilen kaynaklarda şirketi ilgilendiren yeni yayımlar aşağıdadır. Her kalemin altında resmî kaynakçası ve belgenin resmî adresi vardır.</p>
   </td></tr>
 
   {% if onay %}
-  {# Sadece onaylayıcıya giden bildirimde. Raporun içeriği linksizdir, tek link panelin kendi adresi. #}
+  {# Sadece onaylayıcıya giden bildirimde. Panelin kendi adresine giden düğme. #}
   <tr><td style="padding:12px 28px 0;">
     <div style="border:2px solid #c27c0e;background:#fdf6e9;padding:12px 14px;font-size:14px;line-height:1.5;">
       <strong>Onayınızı bekliyor — Rapor #{{ onay.rapor_id }}</strong><br>
@@ -117,6 +117,8 @@
         {# Kaynakça ve ek dosya adı. #}
         <div style="margin-top:10px;font-size:12px;line-height:1.5;color:#4a4a44;">
           <strong>Kaynakça:</strong> {{ k.kaynakca }}
+          {# Belgenin resmî adresi, adres açıkça yazılır ki okuyan nereye gittiğini görsün. #}
+          {% if k.kaynak_linki %}<br><strong>Kaynak:</strong> <a href="{{ k.kaynak_linki }}" style="color:#2f5d8a;word-break:break-all;">{{ k.kaynak_linki }}</a>{% endif %}
           {% if k.ek_adi %}<br><strong>Ek:</strong> {{ k.ek_adi }} (tam metin){% endif %}
         </div>
       </td></tr>

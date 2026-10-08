@@ -87,6 +87,7 @@ export interface Gonderim {
   kalemler: number[];
   gonderildi: string | null;
   hata: string | null;
+  notu: string | null;
 }
 
 // Onay ekranında seçilebilen aktif alıcı grubu.

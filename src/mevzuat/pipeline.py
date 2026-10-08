@@ -9,6 +9,7 @@ Kayıtlar kaynak ve dis_id ile tekil olduğu için aynı şeyi iki kez işlemek 
 # Her kaynağı tarar, yeni kayıtları veritabanına yazar, başlığa göre filtreler ve ilgililerin metnini indirir.
 
 import logging
+import re
 import time
 from datetime import date, datetime
 
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from mevzuat import ocr, surum
 from mevzuat.db import Calisma, KaynakDurumu, Kayit
-from mevzuat.filtre import TUM_DUYURULAR, Konu, eslesmeler, is_kollari
+from mevzuat.filtre import TUM_DUYURULAR, Konu, eslesmeler, is_kollari, tr_kucuk
 from mevzuat.sources.base import Kaynak, KayitTaslagi
 
 log = logging.getLogger(__name__)
@@ -146,6 +147,9 @@ def _ekle(session: Session, kaynak: Kaynak, t: KayitTaslagi, konular: list[Konu]
         return False
     # Başlığın hangi konulara uyduğunu bul.
     eslesen = baslik_eslesmeleri(kaynak, t.baslik, konular)
+    # Resmî Gazete kaynağının zaten yakaladığı belge ikinci kez rapora girmez, kayıt ilgisiz olarak tutulur.
+    if eslesen and getattr(kaynak, "resmi_gazete_tekrari", False) and _resmi_gazetede_var(session, t):
+        eslesen = {}
     # Yeni kaydı oluştur ve ekle.
     session.add(
         Kayit(
@@ -172,6 +176,21 @@ def _ekle(session: Session, kaynak: Kaynak, t: KayitTaslagi, konular: list[Konu]
     # Veritabanına gönder (kesinleştirme yukarıda commit ile).
     session.flush()
     return True
+
+
+# Başlığı karşılaştırmak için sadece harf ve rakamları bırakır, küçük harfe çevirir.
+def _sade_baslik(baslik: str) -> str:
+    return re.sub(r"[^0-9a-zçğıöşü]", "", tr_kucuk(baslik))
+
+
+# Aynı gün Resmî Gazete kaynağında aynı başlıklı kayıt var mı (mevzuat.gov.tr aynı belgeyi birkaç gün sonra ekliyor).
+def _resmi_gazetede_var(session: Session, t: KayitTaslagi) -> bool:
+    aranan = _sade_baslik(t.baslik)
+    sorgu = select(Kayit.baslik).where(Kayit.kaynak == "resmi_gazete", Kayit.yayin_tarihi == t.yayin_tarihi)
+    if t.sayi is not None:
+        sorgu = sorgu.where(Kayit.sayi == t.sayi)
+    # Başlıklar bazen sonda farklılaşıyor (karar sayısı yazımı gibi), ilk 80 harf yeterli.
+    return any(_sade_baslik(b)[:80] == aranan[:80] for b in session.scalars(sorgu))
 
 
 # İçeriği henüz indirilmemiş ilgili kayıtların metnini indirir (her çalışmada en fazla 50 tane).

@@ -101,6 +101,14 @@ class KararIstegi(BaseModel):
     ek_adresler: list[str] = Field(default_factory=list, max_length=50)
 
 
+# Onaylanmış rapordan ek gönderim isteği, seçilen kalemler, gruplar, kişiye özel adresler ve not.
+class EkGonderimIstegi(BaseModel):
+    dahil: list[int] = []
+    notu: str = Field("", max_length=2000)
+    gruplar: list[int] = []
+    ek_adresler: list[str] = Field(default_factory=list, max_length=50)
+
+
 # Alıcı grubu ekleme/düzenleme isteği.
 class GrupIstegi(BaseModel):
     ad: str = Field(max_length=200)
@@ -454,7 +462,7 @@ def uygulama_olustur(
                 "gonderimler": [{
                     "id": g.id, "gruplar": g.gruplar, "alicilar": g.alicilar, "durum": g.durum,
                     "kalemler": [no[i] for i in g.kayit_idler if i in no],
-                    "gonderildi": _zaman(g.gonderildi), "hata": g.hata,
+                    "gonderildi": _zaman(g.gonderildi), "hata": g.hata, "notu": g.notu,
                 } for g in rapor_modulu.gonderimler(db, rapor)],
             }
 
@@ -491,19 +499,50 @@ def uygulama_olustur(
             if not onay:
                 return {"tur": "basari", "mesaj": "Rapor reddedildi, dağıtılmayacak."}
             # Onaylandıysa hemen dağıt ve sonucu anlaşılır bir mesajla bildir.
-            with make_client() as client:
-                gitti = rapor_modulu.dagit(db, client, gonderici, rapor, ek_ekle)
-            if gitti and mail_kapali:
-                return {"tur": "hata", "mesaj": f"Onaylandı ama mail GÖNDERİLMEDİ: mail sunucusu (MEVZUAT_SMTP_HOST) "
-                        f"ayarlı değil, {len(rapor.alicilar)} adrese gidecek mail sunucudaki giden_mailler/ "
-                        "klasörüne yazıldı."}
-            if gitti:
-                return {"tur": "basari", "mesaj": f"Onaylandı ve {len(rapor.alicilar)} adrese gönderildi."}
-            if rapor.hata:
-                return {"tur": "hata",
-                        "mesaj": f"Onaylandı ama bazı mailler gönderilemedi; otomatik tekrar denenecek. ({rapor.hata})"}
-            # Tam o anda günlük iş (tekrar deneme adımı) bazı mailleri sahiplendi, o gönderecek.
-            return {"tur": "basari", "mesaj": "Onaylandı; rapor şu anda gönderiliyor."}
+            return dagit_ve_bildir(db, rapor, "Onaylandı", len(rapor.alicilar))
+
+    # Bekleyen mailleri gönderir ve sonucu panelde gösterilecek mesaja çevirir.
+    def dagit_ve_bildir(db: Session, rapor: Rapor, bas: str, adres_sayisi: int) -> dict:
+        with make_client() as client:
+            gitti = rapor_modulu.dagit(db, client, gonderici, rapor, ek_ekle)
+        if gitti and mail_kapali:
+            return {"tur": "hata", "mesaj": f"{bas} ama mail GÖNDERİLMEDİ: mail sunucusu (MEVZUAT_SMTP_HOST) "
+                    f"ayarlı değil, {adres_sayisi} adrese gidecek mail sunucudaki giden_mailler/ klasörüne yazıldı."}
+        if gitti:
+            return {"tur": "basari", "mesaj": f"{bas} ve {adres_sayisi} adrese gönderildi."}
+        if rapor.hata:
+            return {"tur": "hata",
+                    "mesaj": f"{bas} ama bazı mailler gönderilemedi; otomatik tekrar denenecek. ({rapor.hata})"}
+        # Tam o anda günlük iş (tekrar deneme adımı) bazı mailleri sahiplendi, o gönderecek.
+        return {"tur": "basari", "mesaj": f"{bas}; rapor şu anda gönderiliyor."}
+
+    # Onaylanmış rapordan başka kalemleri başka kişilere gönderir.
+    @api.post("/raporlar/{rapor_id}/ek-gonderim")
+    def ek_gonderim(request: Request, rapor_id: int, istek: EkGonderimIstegi):
+        with Oturum() as db:
+            kullanici = giris_gerekli(request, db)
+            # Onay gibi ek gönderim de sadece onaylayıcının işidir.
+            if kullanici.rol != KARAR_ROLU:
+                denetle(db, "yetkisiz_ek_gonderim_denemesi", kullanici.id, ip(request), rapor_id=rapor_id, rol=kullanici.rol)
+                db.commit()
+                raise HTTPException(403, "Bu işlem için yetkiniz yok.")
+            rapor = db.get(Rapor, rapor_id)
+            if rapor is None:
+                raise HTTPException(404, "Rapor bulunamadı.")
+            onceki = {g.id for g in rapor_modulu.gonderimler(db, rapor)}
+            try:
+                rapor_modulu.ek_gonderim_planla(db, rapor, set(istek.dahil), istek.notu, set(istek.gruplar),
+                                                istek.ek_adresler)
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+            except rapor_modulu.DurumHatasi as e:
+                raise HTTPException(409, str(e))
+            yeni_adresler = {a for g in rapor_modulu.gonderimler(db, rapor) if g.id not in onceki for a in g.alicilar}
+            denetle(db, "ek_gonderim", kullanici.id, ip(request),
+                    rapor_id=rapor_id, dahil=sorted(istek.dahil), notu=istek.notu.strip() or None,
+                    gruplar=istek.gruplar, ek_adresler=istek.ek_adresler)
+            db.commit()
+            return dagit_ve_bildir(db, rapor, "Ek gönderim hazırlandı", len(yeni_adresler))
 
     # --- alıcı grupları
 
