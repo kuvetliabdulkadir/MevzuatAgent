@@ -31,6 +31,7 @@ from mevzuat.filtre import Konu, is_kollari
 from mevzuat.http import ip_disa_acik_mi, make_client
 from mevzuat.sources import TIPLER, kaynak_olustur
 from mevzuat.sources.gib import TURLER as GIB_TURLERI
+from mevzuat.sources.mevzuat_gov import TURLER as MEVZUAT_GOV_TURLERI
 
 
 # Paneldeki formun bir alanı (ör. "Liste sayfası adresi").
@@ -74,6 +75,14 @@ TIP_FORMLARI: dict[str, TipFormu] = {
         "GİB duyuruları", "gib.gov.tr'nin kendi JSON API'si. Tek kaynak; eklenmez.", False,
         (Alan("turler", "Duyuru türleri", "secim_listesi", "Sitedeki sekmeler.", zorunlu=True,
               secenekler={str(k): v for k, v in GIB_TURLERI.items()}), _ORTUSME),
+    ),
+    "mevzuat_gov": TipFormu(
+        "Mevzuat Bilgi Sistemi", "mevzuat.gov.tr'ye yeni eklenen mevzuat, sitenin arama servisinden. Resmî Gazete'de "
+        "zaten yakalanan belge tekrar gelmez. Tek kaynak; eklenmez.", False,
+        (Alan("turler", "Mevzuat türleri", "secim_listesi", "Sitedeki arama formları.", zorunlu=True,
+              secenekler=dict(MEVZUAT_GOV_TURLERI)),
+         Alan("ortusme_gun", "Örtüşme (gün)", "sayi",
+              "Site yeni yayımları birkaç gün geç ekliyor, son taramadan bu kadar gün geriye de bakılır.", varsayilan=5)),
     ),
     "html": TipFormu(
         "Düz HTML sayfası", "Duyuru listesi sayfası; CSS seçicileriyle okunur. Önce Dene ile bulunanları kontrol edin.",
@@ -211,7 +220,11 @@ def ayarlari_temizle(tip: str, ham: dict, cozumle: Cozumleyici | None = None) ->
             bilinmeyen = set(secilen) - set(alan.secenekler)
             if bilinmeyen:
                 raise ValueError(f"'{alan.etiket}' için geçersiz seçim: {sorted(bilinmeyen)}")
-            ayarlar[alan.ad] = sorted({int(d) for d in secilen})
+            # Seçenekler sayıysa (GİB türleri) sayı olarak, değilse (mevzuat.gov.tr türleri) seçenek sırasıyla saklanır.
+            if all(d.isdigit() for d in alan.secenekler):
+                ayarlar[alan.ad] = sorted({int(d) for d in secilen})
+            else:
+                ayarlar[alan.ad] = [d for d in alan.secenekler if d in secilen]
     return ayarlar
 
 

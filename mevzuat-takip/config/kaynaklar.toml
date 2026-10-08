@@ -32,3 +32,12 @@ ad = "gib_mevzuat"
 tip = "gib"
 etiket = "GİB Duyurusu"
 turler = [1]  # 1: Mevzuat. Diğerleri (sistem, sınav, …) şirketi ilgilendirmiyor.
+
+[[kaynak]]
+# mevzuat.gov.tr'ye yeni eklenen mevzuat, sitenin arama servisinden (sources/mevzuat_gov.py).
+# Resmî Gazete'de zaten yakalanan belge tekrar gelmez.
+ad = "mevzuat_gov_yeni"
+tip = "mevzuat_gov"
+etiket = "Mevzuat Bilgi Sistemi"
+turler = ["Kanun", "CumhurbaskaniKararnameleri", "CumhurbaskaniKararlari", "CumhurbaskanligiVeBakanlarKuruluYonetmelik",
+          "KurumVeKurulusYonetmeligi", "Teblig", "CumhurbaskanligiGenelgeleri"]

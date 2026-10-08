@@ -24,6 +24,7 @@ const ISLEM_ADI: Record<string, string> = {
   kullanici_pasif: 'Kullanıcı pasifleştirildi', kullanici_aktif: 'Kullanıcı yeniden açıldı',
   parola_linki_davet: 'Davet maili gönderildi', parola_linki_sifirlama: 'Parola linki gönderildi',
   parola_belirlendi: 'Parola linkle belirlendi', parola_degistirildi: 'Parola değiştirildi',
+  ek_gonderim: 'Ek gönderim yapıldı', yetkisiz_ek_gonderim_denemesi: 'Yetkisiz ek gönderim denemesi',
   yetkisiz_karar_denemesi: 'Yetkisiz onay denemesi', yetkisiz_grup_denemesi: 'Yetkisiz grup denemesi',
   yetkisiz_ayar_denemesi: 'Yetkisiz ayar denemesi', yetkisiz_kurtarma_denemesi: 'Yetkisiz geri alma denemesi',
   yetkisiz_yonetim_denemesi: 'Yetkisiz yönetim denemesi',

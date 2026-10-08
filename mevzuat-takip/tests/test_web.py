@@ -232,6 +232,30 @@ def test_onay_akisi_uctan_uca(ortam):
     assert len(posta.giden) == 1
 
 
+def test_ek_gonderim_gonderilmeyen_kalemi_baska_kisiye_gonderir(ortam):
+    client, engine, posta, rapor_id = ortam
+    _giris(client)
+    kalemler = client.get(f"/api/raporlar/{rapor_id}").json()["kalemler"]
+    ilk, ikinci = kalemler[0]["id"], kalemler[1]["id"]
+    _post(client, f"/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [ilk]})
+    assert len(posta.giden) == 1
+
+    cevap = _post(client, f"/api/raporlar/{rapor_id}/ek-gonderim",
+                  {"dahil": [ikinci], "gruplar": [], "ek_adresler": ["yeni@firma.com"], "notu": "Size de gelsin."})
+    assert cevap.status_code == 200 and cevap.json()["tur"] == "basari" and "1 adrese" in cevap.json()["mesaj"]
+    assert len(posta.giden) == 2
+    mail = posta.giden[1]
+    assert mail.alicilar == ["yeni@firma.com"] and "Size de gelsin." in mail.html
+    with Session(engine) as s:
+        assert s.get(Rapor, rapor_id).durum == "GONDERILDI" and not s.get(Kayit, ikinci).haric
+        assert s.scalars(select(Denetim).where(Denetim.islem == "ek_gonderim")).one().detay["dahil"] == [ikinci]
+    gonderimler = client.get(f"/api/raporlar/{rapor_id}").json()["gonderimler"]
+    assert [g["notu"] for g in gonderimler] == [None, "Size de gelsin."]
+    # Alıcısız istek reddedilir, mail gitmez.
+    bos = _post(client, f"/api/raporlar/{rapor_id}/ek-gonderim", {"dahil": [ikinci], "gruplar": []})
+    assert bos.status_code == 400 and len(posta.giden) == 2
+
+
 def test_ret_notsuz_olmaz(ortam):
     client, engine, posta, rapor_id = ortam
     _giris(client)
@@ -264,10 +288,13 @@ def test_admin_raporu_gorur_ama_karar_veremez(ortam):
     ilk = _kayit_idleri(engine, rapor_id)[0]
     cevap = _post(client, f"/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [ilk]})
     assert cevap.status_code == 403
+    cevap = _post(client, f"/api/raporlar/{rapor_id}/ek-gonderim", {"dahil": [ilk], "ek_adresler": ["x@firma.com"]})
+    assert cevap.status_code == 403
     assert posta.giden == []
     with Session(engine) as s:
         assert s.get(Rapor, rapor_id).durum == "ONAY_BEKLIYOR"
-        assert "yetkisiz_karar_denemesi" in [d.islem for d in s.scalars(select(Denetim))]
+        islemler = [d.islem for d in s.scalars(select(Denetim))]
+        assert "yetkisiz_karar_denemesi" in islemler and "yetkisiz_ek_gonderim_denemesi" in islemler
 
 
 # ---- alıcı grupları ------------------------------------------------------------------------------

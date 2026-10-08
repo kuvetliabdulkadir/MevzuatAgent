@@ -62,6 +62,8 @@ KONTROL_ARALIGI = timedelta(days=7)
 # "yeni yayımlandı" sayılır ve otomatik takibe alınmaz, onları Resmî Gazete kaynağı zaten yakalıyor.
 YENI_YAYIN_SURESI = timedelta(days=30)
 ISTEK_ARASI_BEKLEME = 1.0
+# Site bazı isteklerde listesi boş bir ana sayfa veriyor (08.10.2026, 8 istekten 1'i). Boş gelirse bu kadar kez tekrar istenir.
+LISTE_DENEME = 3
 # Rapordaki bir farkın en fazla kaç karakteri gösterilir (tamamı panelde/metinde).
 PARCA_UZUNLUGU = 400
 # Bir maddede en fazla 4 fark parçası gösterilir.
@@ -164,6 +166,21 @@ def parse_guncellenenler(sayfa: str) -> list[Guncellenen]:
             sadece_pdf="/MevzuatMetin/" in link.attributes.get("href", ""),
         ))
     return sonuc
+
+
+# Ana sayfayı indirip "bugün güncellenenler" listesini çıkarır, liste boş gelirse birkaç kez tekrar ister.
+def guncellenenleri_cek(client: httpx.Client) -> list[Guncellenen]:
+    """Gerçekten güncelleme olmayan günde liste her denemede boş gelir, o zaman boş liste döner."""
+    for deneme in range(LISTE_DENEME):
+        if deneme:
+            time.sleep(ISTEK_ARASI_BEKLEME)
+        response = client.get(ANA_SAYFA)
+        response.raise_for_status()
+        liste = parse_guncellenenler(response.text)
+        if liste:
+            return liste
+        log.info("mevzuat.gov.tr: bugün güncellenenler listesi boş geldi (deneme %d/%d)", deneme + 1, LISTE_DENEME)
+    return []
 
 
 # Bir mevzuatın güncel metnini indirip düz metne çevirir.
@@ -395,9 +412,7 @@ def takip_et(
     ozet_sayac = {"taban": 0, "degisen": 0, "ayni": 0, "hata": 0, "otomatik_eklenen": 0}
 
     # Ana sayfayı indir, "bugün güncellenenler" listesini çıkar.
-    response = client.get(ANA_SAYFA)
-    response.raise_for_status()
-    bugun_guncellenen = {g.anahtar: g for g in parse_guncellenenler(response.text)}
+    bugun_guncellenen = {g.anahtar: g for g in guncellenenleri_cek(client)}
 
     # Ayar dosyasındaki her mevzuatı takip tablosuna ekle/güncelle.
     for t in tanimlar:

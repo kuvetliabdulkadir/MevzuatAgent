@@ -87,14 +87,22 @@ def test_rapor_icerigi():
     assert [e.dosya_adi for e in mail.ekler] == ["01_20261001_20261001-3-3.pdf"]
 
 
-def test_mailde_link_yok():
+def test_mailde_tek_link_belgenin_resmi_adresi():
     k = _kayit(icerik="Ayrıntılar https://masak.hmb.gov.tr/rehber adresinde ve www.ornek.gov.tr sitesinde.",
                icerik_durumu="TAMAM")
     with _client() as c:
         mail = rapor.rapor_olustur([k], GUN, c)
     for govde in (mail.html, mail.metin):
-        assert not re.search(r"https?://|www\.|href=", govde, re.IGNORECASE)
+        assert set(re.findall(r"https?://[^\s\"'<)]+", govde)) == {k.url} and "www.ornek" not in govde
+        assert f"Kaynak: {k.url}" in re.sub(r"<[^>]+>", "", govde)
+    assert f'href="{k.url}"' in mail.html
     assert "[bağlantı kaldırıldı]" in mail.html
+
+
+def test_http_olmayan_kaynak_adresi_maile_konmaz():
+    mail = rapor.rapor_olustur([_kayit(url="javascript:alert(1)")], GUN, None, ek_ekle=False)
+    for govde in (mail.html, mail.metin):
+        assert "javascript:" not in govde and "Kaynak:" not in re.sub(r"<[^>]+>", "", govde)
 
 
 def test_kaynagin_tum_duyurularina_bagli_konunun_aciklamasi_yazilmaz():
@@ -121,7 +129,7 @@ def test_konu_aciklamasi_neden_onemli_satirinda():
     assert satirlar[neden + 1] == "Neden önemli (Vergi): ÖTV tutarları <b>doğrudan</b> fiyatlara yansır."
     for govde in (mail.html, mail.metin):
         assert "görünmemeli" not in govde and "Araç kiralama ve taşıtlar:" not in govde  # açıklamasız konu satırı yok
-        assert not re.search(r"https?://|www\.|href=", govde, re.IGNORECASE)  # açıklamada da link yok
+        assert "ornek.gov.tr" not in govde  # açıklamadaki link silinir
     yalin = rapor.rapor_olustur([_kayit()], GUN, None, ek_ekle=False)
     assert "Neden önemli" not in yalin.html and "Neden önemli" not in yalin.metin
     # Açıklama yokken düz metin eskisiyle aynı, "Neden size geldi" satırı tek başına durur.
@@ -146,7 +154,7 @@ def test_sigmayan_belge_yerine_kaynak_linki(monkeypatch):
     assert len(mail.ekler) == 1
     for govde in (mail.html, mail.metin):
         assert "Kalem 2: https://www.resmigazete.gov.tr/eskiler/2026/10/20261002-2.pdf" in re.sub(r"<[^>]+>", "", govde)
-        assert set(re.findall(r"https?://[^\s\"'<)]+", govde)) == {ikinci.url}
+        assert set(re.findall(r"https?://[^\s\"'<)]+", govde)) == {birinci.url, ikinci.url}
 
 
 def test_ek_kapali_ise_ek_yok():
@@ -242,7 +250,7 @@ def test_onaya_sun_linksiz_bildirim_gonderir(session):
     assert bildirim.alicilar == ["sorumlu@firma.com"] and bildirim.konu.startswith("Onay bekliyor:")
     assert "onay paneline" in bildirim.metin
     for govde in (bildirim.html, bildirim.metin):
-        assert not re.search(r"https?://|www\.|href=", govde, re.IGNORECASE)
+        assert set(re.findall(r"https?://[^\s\"'<)]+", govde)) == {k.url for k in rapor.rapor_kayitlari(session, r)}
     assert rapor.onaya_sun(session, posta, ["sorumlu@firma.com"], bugun=GUN) is None  # kayıtlar zaten raporda
 
 
@@ -255,7 +263,8 @@ def test_onay_bildirimi_tam_icerik_ve_tek_link_panel(session):
     link = f"https://mevzuat.firma.com.tr/?rapor={r.id}"
     for govde in (bildirim.html, bildirim.metin):
         assert f"Rapor #{r.id}" in govde and "Kıymetli Maden Tebliği" in govde and "Kaynakça" in govde
-        assert set(re.findall(r"https?://[^\s\"'<)]+", govde)) == {link}  # içerikteki linkler yine kaldırılır
+        # Panel linki ve belgelerin resmî adresleri, içerikteki linkler yine kaldırılır.
+        assert set(re.findall(r"https?://[^\s\"'<)]+", govde)) == {link} | {k.url for k in rapor.rapor_kayitlari(session, r)}
     assert f'href="{link}"' in bildirim.html and "Onay paneline git" in bildirim.html
     assert bildirim.ekler == [] and bildirim.konu == f"Onay bekliyor: {r.konu}"
 
@@ -864,3 +873,48 @@ def test_eski_cok_alicili_bekleyen_gonderim_eskisi_gibi_tek_mailde_gider(session
     posta = SahteGonderici()
     assert rapor.dagit(session, None, posta, r, ek_ekle=False)
     assert [m.alicilar for m in posta.giden] == [["a@firma.com", "b@firma.com"]]
+
+
+def test_ek_gonderim_gonderilmeyen_kalemi_baska_kisiye_gonderir(session):
+    k1, k2, k3 = _is_kollu_kayitlar(session)
+    kuyum = _grup(session, "Kuyum", ["Kuyum"], ["a@firma.com"])
+    doviz = _grup(session, "Döviz", ["Döviz/Altın"], ["c@firma.com"])
+    session.commit()
+    r = rapor.onaya_sun(session, SahteGonderici(), ["s@firma.com"], bugun=GUN)
+    rapor.karar_ver(session, r, 7, onay=True, dahil_idler={k1.id}, notu="İlk not.", grup_idler={kuyum.id})
+    posta = SahteGonderici()
+    assert rapor.dagit(session, None, posta, r, ek_ekle=False)
+    assert k2.haric and k3.haric and r.durum == "GONDERILDI"
+
+    # Gönderilmiş rapordan ilk seferde seçilmeyen kalemler başka gruba ve kişiye gider.
+    rapor.ek_gonderim_planla(session, r, {k2.id, k3.id}, "İkinci not.", {doviz.id}, ["x@firma.com"])
+    assert r.durum == "ONAYLANDI" and not k2.haric and not k3.haric and "3 kalem" in r.konu
+    posta = SahteGonderici()
+    assert rapor.dagit(session, None, posta, r, ek_ekle=False)
+
+    mailler = {tuple(m.alicilar): m for m in posta.giden}
+    assert set(mailler) == {("c@firma.com",), ("x@firma.com",)}  # ilk alıcıya tekrar gitmez
+    c, x = mailler[("c@firma.com",)], mailler[("x@firma.com",)]
+    assert "Döviz Tebliği" in c.html and "MASAK" not in c.html and "Kuyum Tebliği" not in c.html
+    assert "Döviz Tebliği" in x.html and "MASAK Duyurusu" in x.html
+    assert "İkinci not." in x.html and "İlk not." not in x.html
+    assert r.durum == "GONDERILDI" and r.alicilar == ["a@firma.com", "c@firma.com", "x@firma.com"]
+    assert len(rapor.gonderimler(session, r)) == 3
+
+
+def test_ek_gonderim_dogrulama_ve_durum(session):
+    k1, k2, _ = _is_kollu_kayitlar(session)
+    kuyum = _grup(session, "Kuyum", ["Kuyum"], ["a@firma.com"])
+    session.commit()
+    r = rapor.onaya_sun(session, SahteGonderici(), ["s@firma.com"], bugun=GUN)
+    # Onay bekleyen rapordan ek gönderim olmaz.
+    with pytest.raises(rapor.DurumHatasi):
+        rapor.ek_gonderim_planla(session, r, {k1.id}, None, {kuyum.id})
+    rapor.karar_ver(session, r, 7, onay=True, dahil_idler={k1.id}, notu=None, grup_idler={kuyum.id})
+    with pytest.raises(ValueError, match="En az bir kalem"):
+        rapor.ek_gonderim_planla(session, r, set(), None, {kuyum.id})
+    with pytest.raises(ValueError, match="hiçbir alıcı grubuna gitmiyor"):
+        rapor.ek_gonderim_planla(session, r, {k2.id}, None, {kuyum.id})
+    with pytest.raises(ValueError, match="Geçersiz"):
+        rapor.ek_gonderim_planla(session, r, {k2.id}, None, set(), ["bozuk"])
+    assert len(rapor.gonderimler(session, r)) == 1 and k2.haric
