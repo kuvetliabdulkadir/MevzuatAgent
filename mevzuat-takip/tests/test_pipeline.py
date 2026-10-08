@@ -11,6 +11,7 @@ from mevzuat import pipeline
 from mevzuat.db import Calisma, KaynakDurumu, Kayit, init_db
 from mevzuat.filtre import konulari_yukle
 from mevzuat.sources import kaynaklari_yukle
+from mevzuat.sources import mevzuat_gov
 from mevzuat.sources import resmi_gazete as rg
 
 ROOT = Path(__file__).parents[1]
@@ -32,6 +33,7 @@ SIMDI = datetime(2026, 10, 1, 7, 0)
 @pytest.fixture(autouse=True)
 def beklemesiz(monkeypatch):
     monkeypatch.setattr(rg, "ISTEK_ARASI_BEKLEME", 0)
+    monkeypatch.setattr(mevzuat_gov, "ISTEK_ARASI_BEKLEME", 0)
     monkeypatch.setattr(pipeline, "ISTEK_ARASI_BEKLEME", 0)
 
 
@@ -81,6 +83,11 @@ class SahteSite:
             if url.split("?")[0].endswith("/listPublish"):
                 return httpx.Response(200, json=GIB_DUYURULAR)
             return httpx.Response(200, json={"resultContainer": {"description": "<p>Duyuru metni.</p>"}})
+        if "mevzuat.gov.tr" in url:
+            # Ana sayfa güvenlik anahtarını verir, arama servisi bu testlerde yeni mevzuat döndürmez.
+            if request.url.path == "/":
+                return httpx.Response(200, text='<input name="antiforgerytoken" type="hidden" value="anahtar" />')
+            return httpx.Response(200, json={"draw": 1, "recordsTotal": 0, "recordsFiltered": 0, "data": []})
         if url.endswith(".pdf"):
             return httpx.Response(200, content=PDF, headers={"content-type": "application/pdf"})
         if url.endswith(".htm"):

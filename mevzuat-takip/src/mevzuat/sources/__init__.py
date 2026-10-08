@@ -9,6 +9,7 @@ from pathlib import Path
 from mevzuat.sources.base import Kaynak
 from mevzuat.sources.gib import GibKaynagi
 from mevzuat.sources.html import HtmlKaynagi
+from mevzuat.sources.mevzuat_gov import MevzuatGovKaynagi
 from mevzuat.sources.resmi_gazete import ResmiGazeteKaynagi
 from mevzuat.sources.rss import RssKaynagi
 from mevzuat.sources.tarayici import TarayiciKaynagi
@@ -23,6 +24,8 @@ TIPLER: dict[str, type] = {
     "wordpress": WordPressKaynagi,
     # GİB'in kendi JSON servisi.
     "gib": GibKaynagi,
+    # mevzuat.gov.tr'ye yeni eklenen mevzuat, sitenin arama servisinden.
+    "mevzuat_gov": MevzuatGovKaynagi,
     # Düz HTML duyuru listesi + CSS seçiciler (Chromium yok). Panelden eklenebilir.
     "html": HtmlKaynagi,
     # RSS/Atom duyuru akışı. Panelden eklenebilir, adres girilince otomatik bulunur.

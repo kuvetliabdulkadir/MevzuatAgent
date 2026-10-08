@@ -90,6 +90,25 @@ def test_bugun_guncellenenler_iki_link_bicimi():
     assert any(g.anahtar == "20.5.11822" and g.rg_tarihi == EKIM_1 for g in liste)
 
 
+def test_liste_bos_gelirse_tekrar_istenir():
+    # Site bazen listesi boş ana sayfa veriyor, ikinci istekte dolu geliyor.
+    bos = re.sub(r"<tbody>.*?</tbody>", "<tbody></tbody>", GUNCELLENENLER, flags=re.S)
+    assert surum.parse_guncellenenler(bos) == []
+    sayfalar = iter([bos, GUNCELLENENLER])
+    istekler = []
+
+    def site(request):
+        istekler.append(request)
+        return httpx.Response(200, text=next(sayfalar))
+
+    with httpx.Client(transport=httpx.MockTransport(site)) as c:
+        assert len(surum.guncellenenleri_cek(c)) == 19
+    assert len(istekler) == 2
+    # Gerçekten boş günde sınır kadar denenir, sonra boş liste döner.
+    with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=bos))) as c:
+        assert surum.guncellenenleri_cek(c) == []
+
+
 def test_bolum_bulunamazsa_hata():
     with pytest.raises(ValueError, match="site tasarımı"):
         surum.parse_guncellenenler("<html><body></body></html>")

@@ -235,6 +235,8 @@ class Gonderim(Base):
     # Bu mailde hangi kalemler var.
     kayit_idler: Mapped[list] = mapped_column(JSON, default=list)
     gruplar: Mapped[list] = mapped_column(JSON, default=list)  # onay anındaki grup adları (gösterim için)
+    # Mailin başındaki sorumlu notu. Onayda karar notu, ek gönderimde o gönderimin notu.
+    notu: Mapped[str | None] = mapped_column(Text)
     durum: Mapped[str] = mapped_column(String(20))
     gonderim_denemesi: Mapped[datetime | None]
     gonderildi: Mapped[datetime | None]

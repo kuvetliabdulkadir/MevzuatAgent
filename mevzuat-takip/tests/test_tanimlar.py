@@ -33,10 +33,10 @@ def _ozellik(kaynak) -> tuple:
 
 
 def test_bos_dbye_bir_kez_aktarilir_okunan_tomldakiyle_ayni(session):
-    assert tanimlar.tohumla(session, KAYNAKLAR, KONULAR) == {"konu": 8, "kaynak": 3}
+    assert tanimlar.tohumla(session, KAYNAKLAR, KONULAR) == {"konu": 8, "kaynak": 4}
     assert tanimlar.konulari_oku(session) == konulari_yukle(KONULAR)
     assert [_ozellik(k) for k in tanimlar.kaynaklari_oku(session)] == [_ozellik(k) for k in kaynaklari_yukle(KAYNAKLAR)]
-    assert [k.ad for k in tanimlar.kaynaklari_oku(session)] == ["resmi_gazete", "masak", "gib_mevzuat"]  # sıra korunur
+    assert [k.ad for k in tanimlar.kaynaklari_oku(session)] == ["resmi_gazete", "masak", "gib_mevzuat", "mevzuat_gov_yeni"]  # sıra korunur
 
     # İkinci açılış: tablolar dolu, dosyaya hiç bakılmaz (silinmiş olsa da olur).
     assert tanimlar.tohumla(session, Path("yok/kaynaklar.toml"), Path("yok/konular.toml")) == {}
@@ -61,6 +61,7 @@ def test_pasif_ve_kaldirilan_kaynak_taranmaz_pasif_konu_okunmaz(session):
     tanimlar.tohumla(session, KAYNAKLAR, KONULAR)
     session.get(KaynakTanimi, "masak").aktif = False
     session.get(KaynakTanimi, "gib_mevzuat").kaldirildi = True
+    session.get(KaynakTanimi, "mevzuat_gov_yeni").kaldirildi = True
     konu = session.scalar(select(KonuTanimi).where(KonuTanimi.ad == "Kıymetli madenler ve kuyumculuk"))
     konu.aktif = False
     session.commit()
@@ -109,7 +110,7 @@ def test_eski_veritabani_yukseltilir_checkpoint_gecerli_kalir(tmp_path, monkeypa
     tanimlar.hazirla(engine)  # ikinci kez: tekrar aktarmaz
 
     with Session(engine) as s:
-        assert len(s.scalars(select(KaynakTanimi)).all()) == 3 and len(s.scalars(select(KonuTanimi)).all()) == 8
+        assert len(s.scalars(select(KaynakTanimi)).all()) == 4 and len(s.scalars(select(KonuTanimi)).all()) == 8
         adlar = {k.ad for k in tanimlar.kaynaklari_oku(s)}
         assert {d.kaynak for d in s.scalars(select(KaynakDurumu))} <= adlar
 
@@ -148,7 +149,7 @@ def test_panel_ayardan_kurulur_ve_tanimlari_aktarir(tmp_path, monkeypatch):
     client = TestClient(ayardan_olustur())
     assert client.get("/saglik").status_code == 200
     with Session(create_engine(f"sqlite:///{tmp_path / 'p.db'}")) as s:
-        assert len(tanimlar.kaynaklari_oku(s)) == 3
+        assert len(tanimlar.kaynaklari_oku(s)) == 4
 
 
 def test_ice_aktar_degisikligi_uygular_dosyada_olmayani_kaldirir(session, tmp_path):
@@ -159,7 +160,7 @@ def test_ice_aktar_degisikligi_uygular_dosyada_olmayani_kaldirir(session, tmp_pa
     bloklar = konu_metni.split("\n\n")
     silinen = next(b for b in bloklar if 'ad = "Vergi' in b)
     konu_metni = "\n\n".join(b for b in bloklar if b is not silinen) + '\n[[konu]]\nad = "Gümrük"\nis_kollari = ["Ortak"]\nkelimeler = ["gümrük"]\n'
-    kaynak_metni = kaynak_metni.split('\n\n[[kaynak]]\nad = "gib_mevzuat"')[0] + "\n"
+    kaynak_metni = "\n\n[[kaynak]]".join(b for b in kaynak_metni.split("\n\n[[kaynak]]") if 'ad = "gib_mevzuat"' not in b)
     (tmp_path / "k.toml").write_text(kaynak_metni, encoding="utf-8")
     (tmp_path / "c.toml").write_text(konu_metni, encoding="utf-8")
 
@@ -168,19 +169,19 @@ def test_ice_aktar_degisikligi_uygular_dosyada_olmayani_kaldirir(session, tmp_pa
     vergi = silinen.splitlines()[1].split('"')[1]
     assert ozet["konu_degisen"] == ["Kıymetli madenler ve kuyumculuk"]
     assert ozet["konu_eklenen"] == ["Gümrük"] and ozet["konu_kaldirilan"] == [vergi]
-    assert ozet["kaynak_kaldirilan"] == ["gib_mevzuat"] and not ozet["kaynak_degisen"]
+    assert ozet["kaynak_kaldirilan"] == ["gib_mevzuat"] and ozet["kaynak_degisen"] == ["mevzuat_gov_yeni"]  # sırası bir öne kaydı
     kuyum = next(k for k in tanimlar.konulari_oku(session) if k.ad == "Kıymetli madenler ve kuyumculuk")
     assert "sarrafiye" in kuyum.kelimeler
     assert session.scalar(select(KonuTanimi).where(KonuTanimi.ad == "Kıymetli madenler ve kuyumculuk")).surum == 2
     assert vergi not in [k.ad for k in tanimlar.konulari_oku(session)]
-    assert [k.ad for k in tanimlar.kaynaklari_oku(session)] == ["resmi_gazete", "masak"]
+    assert [k.ad for k in tanimlar.kaynaklari_oku(session)] == ["resmi_gazete", "masak", "mevzuat_gov_yeni"]
 
     # Aynı dosya ikinci kez: değişiklik yok, sürüm artmaz.
     assert not any(tanimlar.ice_aktar(session, tmp_path / "k.toml", tmp_path / "c.toml").values())
     # Eski dosyaya dönmek kaldırılanları geri getirir.
     tanimlar.ice_aktar(session, KAYNAKLAR, KONULAR)
     assert tanimlar.konulari_oku(session) == konulari_yukle(KONULAR)
-    assert [k.ad for k in tanimlar.kaynaklari_oku(session)] == ["resmi_gazete", "masak", "gib_mevzuat"]
+    assert [k.ad for k in tanimlar.kaynaklari_oku(session)] == ["resmi_gazete", "masak", "gib_mevzuat", "mevzuat_gov_yeni"]
 
 
 def test_ice_aktarmada_hata_varsa_hicbir_sey_yazilmaz(session, tmp_path):

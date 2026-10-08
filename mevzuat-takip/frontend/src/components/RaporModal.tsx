@@ -25,6 +25,8 @@ export const RaporModal: React.FC<RaporModalProps> = ({ raporId, kullanici, onKa
   const [bekliyor, setBekliyor] = useState(false);
   const [seciliGruplar, setSeciliGruplar] = useState<Set<number>>(new Set());
   const [ekAdresler, setEkAdresler] = useState<string[]>([]);
+  // Onaylanmış rapordan başka kişilere başka kalemleri gönderme modu.
+  const [ekMod, setEkMod] = useState(false);
 
   // Pencere açılınca raporu sunucudan çek, bütün kalemleri ve kalem alacak grupları işaretli başlat.
   useEffect(() => {
@@ -51,6 +53,20 @@ export const RaporModal: React.FC<RaporModalProps> = ({ raporId, kullanici, onKa
   // Rapor onay bekliyor mu, bu kullanıcı karar verebilir mi.
   const bekleyen = detay?.rapor.durum === 'ONAY_BEKLIYOR';
   const kararVerebilir = bekleyen && kullanici.karar_verebilir;
+  // Onaylanmış raporda onaylayıcı ek gönderim yapabilir, kalem ve alıcı seçimi onaydaki gibi.
+  const ekGonderebilir = kullanici.karar_verebilir && (detay?.rapor.durum === 'ONAYLANDI' || detay?.rapor.durum === 'GONDERILDI');
+  const secimModu = kararVerebilir || ekMod;
+
+  // Ek gönderim modunu açar, henüz gönderilmemiş kalemler işaretli, grup ve adres seçimi boş başlar.
+  const ekModuAc = () => {
+    if (!detay) return;
+    setDahil(new Set(detay.kalemler.filter((k) => k.haric).map((k) => k.id)));
+    setSeciliGruplar(new Set());
+    setEkAdresler([]);
+    setNotu('');
+    setHata('');
+    setEkMod(true);
+  };
 
   // Bir kümede varsa çıkarır, yoksa ekler (kalem ve grup işaretleri için).
   const tersle = (kume: Set<number>, id: number) => {
@@ -67,6 +83,22 @@ export const RaporModal: React.FC<RaporModalProps> = ({ raporId, kullanici, onKa
     try {
       const cevap = await api.post<Mesaj>(`/raporlar/${raporId}/karar`, {
         karar: tur, dahil: [...dahil], notu, gruplar: [...seciliGruplar], ek_adresler: ekAdresler,
+      });
+      onKararVerildi(cevap);
+    } catch (e) {
+      setHata(e instanceof Error ? e.message : 'İstek işlenemedi.');
+    } finally {
+      setBekliyor(false);
+    }
+  };
+
+  // Ek gönderim, seçilen kalemleri seçilen gruplara ve adreslere gönder.
+  const ekGonder = async () => {
+    setHata('');
+    setBekliyor(true);
+    try {
+      const cevap = await api.post<Mesaj>(`/raporlar/${raporId}/ek-gonderim`, {
+        dahil: [...dahil], notu, gruplar: [...seciliGruplar], ek_adresler: ekAdresler,
       });
       onKararVerildi(cevap);
     } catch (e) {
@@ -137,8 +169,15 @@ export const RaporModal: React.FC<RaporModalProps> = ({ raporId, kullanici, onKa
               {kararVerebilir && (
                 <p className="text-xs text-stone-600">
                   Gönderilmesini istemediğiniz kalemlerin işaretini kaldırın. Her kalem altında yazan alıcı gruplarına
-                  <strong> linksiz</strong> mail olarak gider. Her kişiye ayrı mail gider, alıcılar birbirinin adresini görmez (birden çok gruptaki kişi tek mail alır); taranmış belgelerin orijinali ek olarak konur.
+                  mail olarak gider, her kalemin altında belgenin resmî kaynak linki olur. Her kişiye ayrı mail gider, alıcılar birbirinin adresini görmez (birden çok gruptaki kişi tek mail alır); PDF belgelerin orijinali ek olarak konur. İşaretini kaldırdığınız kalemleri sonra başka kişilere ayrıca gönderebilirsiniz.
                 </p>
+              )}
+              {/* Ek gönderim modunda kısa açıklama. */}
+              {ekMod && (
+                <div className="p-3 bg-sky-50 border border-sky-200 rounded-lg text-xs text-sky-900">
+                  <strong>Ek gönderim:</strong> Göndermek istediğiniz kalemleri işaretleyin, aşağıdan grup ya da kişi seçin.
+                  Daha önce gönderilmemiş kalemler işaretli gelir. Mailler sadece bu seçime gider, önceki alıcılara tekrar gitmez.
+                </div>
               )}
               {/* OCR ile okunmuş metin varsa uyarı. */}
               {detay.kalemler.some((k) => k.ocr) && (
@@ -149,15 +188,15 @@ export const RaporModal: React.FC<RaporModalProps> = ({ raporId, kullanici, onKa
 
               {/* Her kalem için bir kart. */}
               {detay.kalemler.map((k) => (
-                <KalemKarti key={k.id} kalem={k} secilebilir={kararVerebilir} secili={dahil.has(k.id)}
+                <KalemKarti key={k.id} kalem={k} secilebilir={secimModu} secili={dahil.has(k.id)}
                   bekleyen={bekleyen} alicilar={kalemAlicilari(k)} onDegistir={() => setDahil(tersle(dahil, k.id))} />
               ))}
 
               {/* Onaylanmışsa dağıtım (gönderim) tablosu. */}
               {detay.gonderimler.length > 0 && <GonderimTablosu detay={detay} />}
 
-              {/* Onaylayıcı için alıcı seçimi. */}
-              {kararVerebilir && (
+              {/* Onaylayıcı için alıcı seçimi (onayda ve ek gönderimde). */}
+              {secimModu && (
                 <AliciSecimi
                   gruplar={detay.gruplar}
                   kalemler={dahilKalemler}
@@ -173,10 +212,12 @@ export const RaporModal: React.FC<RaporModalProps> = ({ raporId, kullanici, onKa
               )}
 
               {/* Not kutusu. */}
-              {kararVerebilir && (
+              {secimModu && (
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-stone-700 block" htmlFor="karar-notu">
-                    Not (isteğe bağlı; onaylarsanız raporun başında görünür, reddederken zorunludur)
+                    {ekMod
+                      ? 'Not (isteğe bağlı; bu gönderimin mailinin başında görünür)'
+                      : 'Not (isteğe bağlı; onaylarsanız raporun başında görünür, reddederken zorunludur)'}
                   </label>
                   <textarea id="karar-notu" rows={3} maxLength={2000} value={notu} onChange={(e) => setNotu(e.target.value)}
                     className="w-full text-xs p-3 rounded-lg border border-paper-300 bg-white focus:outline-hidden focus:ring-2 focus:ring-petrol/20" />
@@ -193,6 +234,27 @@ export const RaporModal: React.FC<RaporModalProps> = ({ raporId, kullanici, onKa
             className="w-full sm:w-auto px-4 py-2 text-xs font-medium text-stone-600 hover:text-stone-900 rounded-lg hover:bg-paper-200 transition-colors cursor-pointer">
             Kapat
           </button>
+          {/* Onaylanmış raporda ek gönderim düğmesi. */}
+          {ekGonderebilir && !ekMod && (
+            <button onClick={ekModuAc}
+              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-petrol bg-white border border-petrol/40 hover:bg-petrol/5 cursor-pointer">
+              <Send className="w-3.5 h-3.5 shrink-0" />
+              <span>Başka kişilere gönder</span>
+            </button>
+          )}
+          {ekMod && (
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
+              <button onClick={() => setEkMod(false)} disabled={bekliyor}
+                className="px-4 py-2 rounded-lg text-xs font-medium text-stone-600 bg-white border border-paper-300 hover:bg-paper-200 disabled:opacity-60 cursor-pointer">
+                Vazgeç
+              </button>
+              <button onClick={ekGonder} disabled={bekliyor || plan.length === 0}
+                className="flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg text-xs font-semibold text-white bg-petrol hover:bg-petrol-dark shadow-xs disabled:opacity-60 cursor-pointer">
+                <span>{bekliyor ? 'Gönderiliyor…' : `Seçilen ${dahil.size} kalemi ${kisiSayisi} kişiye gönder`}</span>
+                <Send className="w-3.5 h-3.5 ml-1 text-gold-light shrink-0" />
+              </button>
+            </div>
+          )}
           {kararVerebilir && (
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
               <button onClick={() => karar('reddet')} disabled={bekliyor}
@@ -246,7 +308,7 @@ const KalemKarti: React.FC<{
           )}
           {!bekleyen && k.haric && (
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-800 border border-rose-300">
-              ÇIKARILDI
+              GÖNDERİLMEDİ
             </span>
           )}
         </div>
@@ -262,8 +324,8 @@ const KalemKarti: React.FC<{
             </span>
           ))}
         </div>
-        {/* Onay bekliyorsa ve işaretliyse, kime gidecek (ya da kimseye gitmiyor uyarısı). */}
-        {bekleyen && secili && (
+        {/* Seçim yapılıyorsa ve işaretliyse, kime gidecek (ya da kimseye gitmiyor uyarısı). */}
+        {secilebilir && secili && (
           alicilar.length > 0 ? (
             <div className="flex items-center gap-1.5 text-xs text-stone-600">
               <Users className="w-3.5 h-3.5 text-stone-400" />
@@ -359,7 +421,7 @@ const GonderimTablosu: React.FC<{ detay: RaporDetayi }> = ({ detay }) => {
   // Gönderimleri kalem kümesine göre grupla.
   const paketler = new Map<string, Gonderim[]>();
   for (const g of detay.gonderimler) {
-    const anahtar = g.kalemler.join(',');
+    const anahtar = `${g.kalemler.join(',')}|${g.notu ?? ''}`;
     paketler.set(anahtar, [...(paketler.get(anahtar) ?? []), g]);
   }
   return (
@@ -378,6 +440,7 @@ const GonderimTablosu: React.FC<{ detay: RaporDetayi }> = ({ detay }) => {
               <tr className="bg-paper-50">
                 <td colSpan={4} className="px-3 py-1.5 text-stone-600">
                   Kalemler: <strong>{liste[0].kalemler.join(', ')}</strong> · {liste.length} mail
+                  {liste[0].notu && <> · Not: {liste[0].notu}</>}
                 </td>
               </tr>
               {liste.map((g) => (
