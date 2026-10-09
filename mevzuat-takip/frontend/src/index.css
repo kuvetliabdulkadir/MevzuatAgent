@@ -148,6 +148,17 @@
   }
 }
 
+/* Telefonda ve tablette kutu yazıları 16px. iPhone Safari 16px'ten küçük kutuya dokununca sayfayı büyütüyor,
+   geri küçültmüyor, sayfa ekrana sığmıyor. Katman dışında, kutudaki text-xs gibi sınıfların önüne geçsin diye.
+   Masaüstü (lg ve üstü) eskisi gibi. */
+@media (max-width: 1023.98px) {
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
 /* Custom scrollbar for diff and long lists */
 ::-webkit-scrollbar {
   width: 6px;
