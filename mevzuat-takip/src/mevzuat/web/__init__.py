@@ -1348,7 +1348,7 @@ def uygulama_olustur(
     # API'nin OpenAPI tanımı. Panele giriş yapmış kullanıcı ya da geçerli API anahtarı ister.
     # Panel adresi tanımlıysa tanıma sunucu adresi olarak yazılır (Postman gibi araçlar istekleri oraya atar).
     def openapi_semasi(db: Session) -> dict:
-        sema = get_openapi(title="Mevzuat Takip API", version="1.0", description=panel_belgesi.ACIKLAMA,
+        sema = get_openapi(title="Mevzuat Takip API", version="1.0",
                            routes=[*portal_yolu.routes, *api.routes], tags=panel_belgesi.ETIKETLER)
         adres = ayar(db).panel_adresi
         if adres:

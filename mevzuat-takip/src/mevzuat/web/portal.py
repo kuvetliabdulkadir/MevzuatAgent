@@ -1,6 +1,6 @@
 """Sürümlü adresler (/api/v1). Dış sistemlerin (şirket portalı vb.) mevzuatı okuduğu, raporu onayladığı, taramayı,
 kaynakları, konuları ve alıcı gruplarını yönettiği adresler. Alanlar değişirse yeni sürüm (/api/v2) açılır, v1 bozulmaz.
-Kimlik doğrulama her istekte API anahtarıyla yapılır (Authorization: Bearer). Dokümanın açıklaması web/panel_belgesi.py'de.
+Kimlik doğrulama her istekte API anahtarıyla yapılır (Authorization: Bearer).
 """
 
 from collections.abc import Callable
