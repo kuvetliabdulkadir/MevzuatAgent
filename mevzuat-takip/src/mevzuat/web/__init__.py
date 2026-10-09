@@ -1346,12 +1346,13 @@ def uygulama_olustur(
                     for o in ogeler if menu_yetkisi(kullanici, o.yetki)]
 
     # API'nin OpenAPI tanımı. Panele giriş yapmış kullanıcı ya da geçerli API anahtarı ister.
-    # Panel adresi tanımlıysa tanıma sunucu adresi olarak yazılır (Postman gibi araçlar istekleri oraya atar).
-    def openapi_semasi(db: Session) -> dict:
+    # İndirilen dokümana panel adresi sunucu adresi olarak yazılır (Postman ve bilgisayardan açılan HTML istekleri oraya atar).
+    # Sayfadaki doküman zaten bu sunucudan açıldığı için adres yazılmaz, istekler sayfanın adresine gider.
+    def openapi_semasi(db: Session, sunucu_adresli: bool = False) -> dict:
         sema = get_openapi(title="Mevzuat Takip API", version="1.0",
                            routes=[*portal_yolu.routes, *api.routes], tags=panel_belgesi.ETIKETLER)
         adres = ayar(db).panel_adresi
-        if adres:
+        if adres and sunucu_adresli:
             sema["servers"] = [{"url": adres, "description": "Mevzuat Takip"}]
         return sema
 
@@ -1381,7 +1382,7 @@ def uygulama_olustur(
     def api_dokumani_indir(request: Request, bicim: Literal["html", "json"] = "html"):
         with Oturum() as db:
             dokuman_gerekli(request, db)
-            sema = openapi_semasi(db)
+            sema = openapi_semasi(db, sunucu_adresli=True)
         tarih = datetime.now().strftime("%Y%m%d")
         if bicim == "json":
             return JSONResponse(sema, headers={"Content-Disposition": f'attachment; filename="mevzuat-api-{tarih}.json"'})
