@@ -26,9 +26,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   const basHarfler = kullanici.ad.split(' ').map((p) => p.charAt(0)).join('').slice(0, 2).toLocaleUpperCase('tr');
 
   return (
-    <header className="h-16 bg-white border-b border-paper-300 px-3 sm:px-6 flex items-center justify-between sticky top-0 z-20 shadow-xs select-none">
-      {/* Sol taraf, telefonda menü düğmesi + logo ve başlık. */}
-      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+    <header className="h-16 bg-white border-b border-paper-300 px-3 sm:px-6 flex items-center justify-between gap-2 sticky top-0 z-20 shadow-xs select-none">
+      {/* Sol taraf, telefonda menü düğmesi + logo ve başlık. Dar ekranda başlık kısalır, sağdaki düğmelere değmez. */}
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         {/* Telefonda görünen menü aç/kapat düğmesi. */}
         <button
           type="button"
@@ -39,12 +39,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           {isMobileMenuOpen ? <X className="w-5 h-5 text-petrol" /> : <Menu className="w-5 h-5" />}
         </button>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 rounded-lg bg-petrol flex items-center justify-center text-white font-bold text-sm shadow-xs shrink-0">
             MT
           </div>
-          <div>
-            <h1 className="font-bold text-stone-900 text-sm tracking-tight leading-tight">Mevzuat Takip</h1>
+          <div className="min-w-0">
+            <h1 className="font-bold text-stone-900 text-sm tracking-tight leading-tight truncate">Mevzuat Takip</h1>
             <p className="hidden md:block text-[11px] text-stone-500 font-mono leading-tight">
               Kuyumculuk Mevzuatı & Uyum Takip Sistemi
             </p>

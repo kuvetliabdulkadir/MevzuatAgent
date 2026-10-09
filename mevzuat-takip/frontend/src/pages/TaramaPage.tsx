@@ -143,10 +143,13 @@ const ZamanlayiciKarti: React.FC<{ durum: ZamanlamaDurumu }> = ({ durum }) => (
     ) : (
       <ZamanlayiciUyarisi durum={durum} />
     )}
-    <div className="flex items-center gap-2 text-stone-700">
-      <Clock className="w-4 h-4 text-stone-500" />
-      Sonraki planlı tarama: <strong>{tarihSaat(durum.sonraki)}</strong>
-      <span className="text-stone-500">(devlet sitelerine aynı anda yüklenmemek için saatten sonraki 10 dk içinde başlar)</span>
+    {/* Satır kaydırılabilir, telefonda üç dar sütuna sıkışmaz, yazılar alt alta akar. */}
+    <div className="flex items-start gap-2 text-stone-700">
+      <Clock className="w-4 h-4 text-stone-500 shrink-0 mt-0.5" />
+      <p>
+        Sonraki planlı tarama: <strong>{tarihSaat(durum.sonraki)}</strong>{' '}
+        <span className="text-stone-500">(devlet sitelerine aynı anda yüklenmemek için saatten sonraki 10 dk içinde başlar)</span>
+      </p>
     </div>
   </div>
 );
