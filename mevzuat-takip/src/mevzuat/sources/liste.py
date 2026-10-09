@@ -40,8 +40,10 @@ AYLAR = {ay: i for i, ay in enumerate(
 # Rakamlı tarih kalıbı, gün . ay . yıl (ayraç nokta, eğik çizgi ya da tire olabilir). Ör. 02.10.2026, 2/10/2026.
 # Kalıbın başındaki ve sonundaki ek kısımlar önünde ve arkasında başka rakam olmasın demek, böylece 123.10.20261 gibi şeyler yakalanmaz.
 _SAYISAL = re.compile(r"(?<!\d)(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?!\d)")
-# Yazıyla tarih kalıbı, "2 ekim 2026". Ay adları yukarıdaki sözlükten "ocak|şubat|..." diye birleştiriliyor.
-_YAZIYLA = re.compile(r"(?<!\d)(\d{1,2})\s+(" + "|".join(AYLAR) + r")\s+(\d{4})(?!\d)")
+# Ayların üç harfli kısaltmaları, TCMB akışı "1 Eki 2026" yazıyor.
+AY_KISALTMALARI = {ay[:3]: no for ay, no in AYLAR.items()}
+# Yazıyla tarih kalıbı, "2 ekim 2026" ya da "2 eki. 2026". Önce tam adlar denenir, "mart" yerine "mar" yakalanmasın.
+_YAZIYLA = re.compile(r"(?<!\d)(\d{1,2})\s+(" + "|".join([*AYLAR, *AY_KISALTMALARI]) + r")\.?\s+(\d{4})(?!\d)")
 
 
 # Listeden okunan tek bir duyuru, başlık, adres, tarih.
@@ -71,7 +73,7 @@ def tarih_oku(metin: str, bicim: str | None = None) -> date | None:
             return date(int(m[3]), int(m[2]), int(m[1]))
         # Yoksa yazıyla tarihi ara (önce Türkçe küçük harfe çevirip).
         if m := _YAZIYLA.search(tr_kucuk(metin)):
-            return date(int(m[3]), AYLAR[m[2]], int(m[1]))
+            return date(int(m[3]), AYLAR.get(m[2]) or AY_KISALTMALARI[m[2]], int(m[1]))
     # Kalıba uyuyor ama 31 Şubat gibi takvimde olmayan bir günse tarih yok say.
     except ValueError:  # 31.02.2026 gibi
         return None

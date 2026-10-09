@@ -48,6 +48,10 @@ def _tara(checkpoint, bugun, istekler=None):
     ("2 Ekim 2026", date(2026, 10, 2)),
     ("  15   AĞUSTOS 2026 Cuma", date(2026, 8, 15)),
     ("1 şubat 2026", date(2026, 2, 1)),
+    ("1 Eki 2026 00:00:00", date(2026, 10, 1)),  # TCMB akışı, kısaltılmış ay
+    ("5 ağu. 2026", date(2026, 8, 5)),
+    ("3 Mar 2026", date(2026, 3, 3)),
+    ("3 Mart 2026", date(2026, 3, 3)),
     ("31.02.2026", None),
     ("Duyuru", None),
 ])
@@ -105,6 +109,30 @@ def test_ic_aga_giden_pdf_linki_de_indirilmez():
     with _istemci(istekler) as c, pytest.raises(ValueError, match="standart port"):
         HtmlKaynagi(**AYAR).icerik(c, "x", "https://www.ornek.gov.tr:8443/rapor.pdf")
     assert istekler == []
+
+
+def test_yonlendirme_kontrol_edilerek_takip_edilir():
+    """TCMB duyuru linkleri http, site https'e yönlendiriyor. Yönlendirme takip edilir, iç ağa olan engellenir."""
+    istekler = []
+
+    def handler(request):
+        istekler.append(str(request.url))
+        if request.url.scheme == "http":
+            return httpx.Response(302, headers={"Location": str(request.url.copy_with(scheme="https"))})
+        if request.url.path == "/ic":
+            return httpx.Response(302, headers={"Location": "http://10.0.0.5/gizli"})
+        if request.url.path == "/dongu":
+            return httpx.Response(302, headers={"Location": "/dongu"})
+        return httpx.Response(200, content=DETAY, headers={"Content-Type": "text/html; charset=utf-8"})
+
+    with make_client(transport=httpx.MockTransport(handler)) as c:
+        assert "görüşe açıktır" in HtmlKaynagi(**AYAR).icerik(c, "x", "http://www.ornek.gov.tr/duyuru/1").metin
+        with pytest.raises(ValueError, match="İç ağ"):
+            HtmlKaynagi(**AYAR).icerik(c, "x", "https://www.ornek.gov.tr/ic")
+        with pytest.raises(ValueError, match="Çok fazla yönlendirme"):
+            HtmlKaynagi(**AYAR).icerik(c, "x", "https://www.ornek.gov.tr/dongu")
+    assert istekler[:2] == ["http://www.ornek.gov.tr/duyuru/1", "https://www.ornek.gov.tr/duyuru/1"]
+    assert not any("10.0.0.5" in i for i in istekler)
 
 
 def test_gecersiz_secici_ve_bos_alan_kaydedilemez():

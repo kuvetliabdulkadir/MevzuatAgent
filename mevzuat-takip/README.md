@@ -50,9 +50,21 @@ Sağlık kontrolü → sorun varsa yöneticiye UYARI, her pazartesi NABIZ maili
 | Rol | Ne yapar |
 |---|---|
 | **Onaylayıcı** | Raporları onaylar/reddeder, alıcı gruplarını, kaynakları, konuları yönetir, "Şimdi tara" der |
-| **Admin** | Kurtarma rolü: kullanıcı davet eder, parola linki gönderir, yanlış değişikliği geçmişten geri alır. **Rapor onaylayamaz** (görev ayrılığı) |
+| **Admin** | Kurtarma rolü: kullanıcı davet eder, parola linki gönderir, yanlış değişikliği geçmişten geri alır, ayarları ve API anahtarlarını yönetir. **Rapor onaylayamaz** (görev ayrılığı) |
+| **API kullanıcısı** | Dış geliştirici: panelde sadece API dokümanını görür, istek atmak için API anahtarı kullanır |
 
-Panel sayfaları: Raporlar (onay) · Alıcı grupları · Kaynaklar · Konular · Tarama · Kullanıcılar · Denetim kaydı.
+Panel sayfaları: Raporlar (onay) · Alıcı grupları · Kaynaklar · Konular · Tarama · Kullanıcılar · Denetim kaydı · Ayarlar · API anahtarları.
+Sol menü veritabanından gelir (`menu_ogeleri`), her kullanıcı yetkisine uyan öğeleri görür.
+
+**API:** Panelde yapılabilen her şey API'den de yapılır, şirket portalı bizim arayüz yerine bunu kullanabilir.
+Mevzuat arama ve detayı sürümlüdür (`/api/v1`). Doküman (Swagger) `/api/dokuman` adresinde, doğrudan açılır (`MEVZUAT_DOKUMAN_ACIK=0` ise anahtar ister), HTML ya
+da OpenAPI JSON olarak da indirilir. Anahtar `Authorization: Bearer mvz_...` biçiminde gönderilir, panelden ya da `api-anahtari-uret`
+komutuyla üretilir. Anahtar seçilen rolün (tam yetki, admin ya da onaylayıcı) yetkisiyle çalışır,
+süreli ya da süresiz olur, iptal edilebilir, her isteği denetim kaydına yazılır, kendisi değil özeti saklanır.
+Adım adım deneme senaryoları (adres, gövde, beklenen sonuç): [deploy/API-TEST-REHBERI.md](deploy/API-TEST-REHBERI.md).
+
+**Ayarlar:** Mail sunucusu, panel adresi, uyarı adresleri, PDF eki, MFA zorunluluğu ve saklama süreleri panelden değişir,
+yeniden başlatma gerekmez. Panelde girilen değer `.env`'in önüne geçer. Mail şifresi veritabanında şifreli saklanır.
 
 ## Teknoloji
 
@@ -84,6 +96,9 @@ Panel sayfaları: Raporlar (onay) · Alıcı grupları · Kaynaklar · Konular �
 - Sırlar `.env`'de, depoda sadece `.env.example`.
 
 ## Kurulum (Docker)
+
+Sunucuda Docker yoksa: [`deploy/KURULUM-DOCKERSIZ.md`](deploy/KURULUM-DOCKERSIZ.md) (PostgreSQL + uv + systemd,
+temiz Debian 12'de `deploy/prova-dockersiz.sh` ile adım adım denenir).
 
 ```sh
 cp .env.example .env

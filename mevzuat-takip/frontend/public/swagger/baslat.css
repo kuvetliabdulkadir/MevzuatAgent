@@ -1,0 +1,12 @@
+/* Doküman sayfasındaki API anahtarı formu ve bilgi satırı. */
+.ag-form { max-width: 520px; margin: 64px auto; padding: 24px; border: 1px solid #d9d4c7; border-radius: 12px;
+  background: #fff; font-family: sans-serif; color: #1f2328; }
+.ag-baslik { margin: 0 0 8px; font-size: 20px; }
+.ag-metin { margin: 0 0 16px; font-size: 13px; color: #57534e; line-height: 1.5; }
+.ag-satir { display: flex; gap: 8px; flex-wrap: wrap; }
+.ag-girdi { flex: 1; min-width: 0; padding: 10px; border: 1px solid #d9d4c7; border-radius: 8px; font-family: monospace; }
+.ag-dugme { padding: 10px 16px; border: 0; border-radius: 8px; background: #2f5d5a; color: #fff; font-weight: 600; cursor: pointer; }
+.ag-hata { margin: 12px 0 0; font-size: 13px; color: #9f1239; }
+.ag-bilgi { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; padding: 8px 16px;
+  background: #fdf6e9; border-bottom: 1px solid #e9d8b4; font: 13px sans-serif; color: #57534e; }
+.ag-cikis { padding: 4px 10px; border: 1px solid #d9d4c7; border-radius: 6px; background: #fff; cursor: pointer; }

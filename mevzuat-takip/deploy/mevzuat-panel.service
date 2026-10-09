@@ -1,0 +1,29 @@
+# Mevzuat Takip — onay paneli ve API (sürekli çalışan web sunucusu). Docker'sız kurulum: deploy/KURULUM-DOCKERSIZ.md
+#
+# Kurulum:  cp deploy/mevzuat-panel.service /etc/systemd/system/ && systemctl enable --now mevzuat-panel
+# Loglar:   journalctl -u mevzuat-panel -f
+#
+# Panel 127.0.0.1'de dinler, sunucunun dışından doğrudan erişilemez. Önüne HTTPS'li ters vekil (nginx, Caddy ya da
+# şirketin vekili) konur ve .env'de MEVZUAT_HTTPS=1 yapılır.
+
+[Unit]
+Description=Mevzuat Takip onay paneli
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+User=mevzuat
+Group=mevzuat
+WorkingDirectory=/opt/mevzuat/mevzuat-takip
+Environment=TZ=Europe/Istanbul HOME=/opt/mevzuat
+ExecStart=/usr/local/bin/uv run --frozen --no-dev python -m mevzuat.cli panel --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mevzuat
+
+[Install]
+WantedBy=multi-user.target

@@ -1,10 +1,22 @@
-// Sol menü, kullanıcının rolüne göre görebileceği sayfalar.
-import React from 'react';
-import { Clock, FileCheck2, Globe, History, Info, Layers, Mail, Users, X } from 'lucide-react';
-import { Kullanici } from '../types/api';
+// Sol menü. Öğeler veritabanından gelir (/api/menu), sunucu sadece kullanıcının yetkisine uyanları gönderir.
+import React, { useEffect, useState } from 'react';
+import {
+  BookOpen, Circle, Clock, ExternalLink, FileCheck2, Globe, History, Info, KeyRound, Layers, LucideIcon, Mail, Settings,
+  Users, X,
+} from 'lucide-react';
+import { api } from '../api';
+import { Kullanici, MenuOgesi } from '../types/api';
 
-// Menüdeki sekmelerin adları.
-export type ActiveTab = 'raporlar' | 'gruplar' | 'kaynaklar' | 'konular' | 'tarama' | 'kullanicilar' | 'denetim';
+// Arayüzde karşılığı olan sayfaların adları.
+const SEKMELER = [
+  'raporlar', 'gruplar', 'kaynaklar', 'konular', 'tarama', 'kullanicilar', 'denetim', 'ayarlar', 'api_anahtarlari', 'api',
+] as const;
+export type ActiveTab = (typeof SEKMELER)[number];
+
+// Veritabanındaki ikon adından ikona, tanınmayan ad için daire çıkar.
+const IKONLAR: Record<string, LucideIcon> = {
+  BookOpen, Clock, FileCheck2, Globe, History, KeyRound, Layers, Mail, Settings, Users,
+};
 
 interface SidebarProps {
   kullanici: Kullanici;
@@ -24,21 +36,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isMobileOpen = false,
   onCloseMobile,
 }) => {
-  const menu = [
-    { id: 'raporlar' as ActiveTab, label: 'Onay Kuyruğu', desc: 'Mevzuat raporları', icon: FileCheck2,
-      badge: bekleyenSayisi, gorunur: true },
-    { id: 'gruplar' as ActiveTab, label: 'Alıcı Grupları', desc: 'Kime, hangi iş kolu', icon: Mail,
-      gorunur: kullanici.grup_yonetebilir },
-    { id: 'kaynaklar' as ActiveTab, label: 'Kaynaklar', desc: 'Taranan siteler', icon: Globe,
-      gorunur: kullanici.ayar_yonetebilir },
-    { id: 'konular' as ActiveTab, label: 'Konular', desc: 'Anahtar kelimeler', icon: Layers,
-      gorunur: kullanici.ayar_yonetebilir },
-    { id: 'tarama' as ActiveTab, label: 'Tarama', desc: 'Saatler ve durum', icon: Clock, gorunur: true },
-    { id: 'kullanicilar' as ActiveTab, label: 'Kullanıcılar', desc: 'Ekle, parola, pasifleştir', icon: Users,
-      gorunur: kullanici.kurtarma_yapabilir },
-    { id: 'denetim' as ActiveTab, label: 'Denetim Kaydı', desc: 'Kim, ne zaman, ne yaptı', icon: History,
-      gorunur: kullanici.kurtarma_yapabilir },
-  ];
+  // Menü sunucudan bir kez çekilir. Arayüzde sayfası olmayan ve bağlantı da olmayan öğe gösterilmez.
+  const [menu, setMenu] = useState<MenuOgesi[]>([]);
+  useEffect(() => {
+    api.get<MenuOgesi[]>('/menu').then(setMenu).catch(() => setMenu([]));
+  }, []);
+  const gosterilecek = menu.filter((m) => m.adres || (SEKMELER as readonly string[]).includes(m.anahtar));
 
   // Bir sekmeye tıklanınca, sekmeyi değiştir, telefonda menüyü kapat.
   const sec = (tab: ActiveTab) => {
@@ -53,7 +56,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Üstte, rol başlığı ve telefonda kapat düğmesi. */}
         <div className="px-3 pb-3 mb-2 border-b border-paper-200 flex items-center justify-between">
           <p className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider font-mono">
-            {kullanici.rol === 'admin' ? 'YÖNETİCİ KONSOLU' : 'ONAYLAYICI KONSOLU'}
+            {kullanici.rol === 'admin' ? 'YÖNETİCİ KONSOLU' : kullanici.api_kullanicisi ? 'API ERİŞİMİ' : 'ONAYLAYICI KONSOLU'}
           </p>
           {onCloseMobile && (
             <button onClick={onCloseMobile} aria-label="Menüyü Kapat"
@@ -65,35 +68,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Sekmeler, sadece görünür olanlar, seçili olan koyu renkli. */}
         <nav className="space-y-1">
-          {menu.filter((m) => m.gorunur).map((item) => {
-            const Icon = item.icon;
-            const aktif = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => sec(item.id)}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer ${
-                  aktif ? 'bg-petrol text-white shadow-xs' : 'text-stone-700 hover:bg-paper-200 hover:text-stone-900'
-                }`}
-              >
+          {gosterilecek.map((item) => {
+            const Icon = IKONLAR[item.ikon] ?? Circle;
+            const aktif = !item.adres && activeTab === item.anahtar;
+            const rozet = item.anahtar === 'raporlar' ? bekleyenSayisi : 0;
+            const sinif = `w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer ${
+              aktif ? 'bg-petrol text-white shadow-xs' : 'text-stone-700 hover:bg-paper-200 hover:text-stone-900'
+            }`;
+            const ic = (
+              <>
                 <div className="flex items-center gap-3">
                   <Icon className={`w-4 h-4 shrink-0 ${aktif ? 'text-gold-light' : 'text-stone-500'}`} />
                   <div>
-                    <div className="text-xs font-semibold leading-tight">{item.label}</div>
+                    <div className="text-xs font-semibold leading-tight">{item.etiket}</div>
                     <div className={`text-[10px] leading-tight ${aktif ? 'text-stone-300' : 'text-stone-500'}`}>
-                      {item.desc}
+                      {item.aciklama}
                     </div>
                   </div>
                 </div>
+                {/* Bağlantı öğesi yeni sekmede açılır, yanında işareti olur. */}
+                {item.adres && <ExternalLink className="w-3.5 h-3.5 text-stone-400 shrink-0" />}
                 {/* Bekleyen rapor sayısı rozeti. */}
-                {item.badge !== undefined && item.badge > 0 && (
+                {rozet > 0 && (
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                     aktif ? 'bg-brick text-white' : 'bg-brick-light/10 text-brick border border-brick-light/30'
                   }`}>
-                    {item.badge}
+                    {rozet}
                   </span>
                 )}
-              </button>
+              </>
+            );
+            return item.adres ? (
+              <a key={item.anahtar} href={item.adres} target="_blank" rel="noopener noreferrer" className={sinif}>{ic}</a>
+            ) : (
+              <button key={item.anahtar} onClick={() => sec(item.anahtar as ActiveTab)} className={sinif}>{ic}</button>
             );
           })}
         </nav>
@@ -108,7 +116,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <p className="text-[10px] leading-normal text-stone-500">
           {kullanici.karar_verebilir
             ? 'Raporları inceleyip onaylama veya reddetme yetkiniz var. Onaylanan rapor alıcı gruplarına mail olarak gider.'
-            : 'Yönetici olarak kullanıcıları ve denetim kaydını yönetir, yanlış ayarları geri alırsınız. Onay/ret kararını onaylayıcı verir.'}
+            : kullanici.api_kullanicisi
+              ? 'API dokümanını görürsünüz. İstek atmak için yöneticinin verdiği API anahtarını dokümandaki Authorize düğmesine girin.'
+              : 'Yönetici olarak kullanıcıları ve denetim kaydını yönetir, yanlış ayarları geri alırsınız. Onay/ret kararını onaylayıcı verir.'}
         </p>
       </div>
     </div>

@@ -3,7 +3,7 @@
 // TypeScript "tip" tanımları, kod çalışırken bir şey yapmaz, sadece verinin hangi alanlara sahip olduğunu tarif eder.
 // Yanlış alan adı yazılırsa derleme hata verir. Dik çizgi ya bu ya şu demek, soru işareti ya da null o alanın boş olabileceğini söyler.
 // Kullanıcı rolleri, rapor durumları ve mail (gönderim) durumları.
-export type Rol = 'admin' | 'onaylayici';
+export type Rol = 'admin' | 'onaylayici' | 'api';
 export type RaporDurumu = 'ONAY_BEKLIYOR' | 'ONAYLANDI' | 'GONDERILDI' | 'REDDEDILDI' | 'GONDERILIYOR';
 export type GonderimDurumu = 'BEKLIYOR' | 'GONDERILIYOR' | 'GONDERILDI';
 
@@ -18,6 +18,7 @@ export interface Kullanici {
   grup_yonetebilir: boolean;
   ayar_yonetebilir: boolean; // kaynak ve konu yönetimi
   kurtarma_yapabilir: boolean; // kaynak/konu geçmişinden önceki hale döndürme (admin)
+  api_kullanicisi: boolean; // sadece API dokümanını görür
 }
 
 // GET /api/oturum cevabı.
@@ -390,4 +391,55 @@ export interface BulmaSonucu {
   ornekler?: { baslik: string; tarih: string; url: string }[];
   icerik_ornegi?: string | null; // ilk duyurunun sayfasından okunan metin (doğru alan mı, kullanıcı görsün)
   adimlar: BulmaAdimi[];
+}
+
+// Sol menünün bir öğesi (veritabanından, /api/menu). adres doluysa yeni sekmede açılan bağlantıdır.
+export interface MenuOgesi {
+  anahtar: string;
+  etiket: string;
+  aciklama: string;
+  ikon: string;
+  adres: string | null;
+}
+
+// Panelden değiştirilen bir ayar (GET /api/ayarlar). kaynak, değerin nereden geldiği. Şifrenin değeri hiç gelmez.
+export interface AyarAlani {
+  ad: string;
+  grup: string;
+  etiket: string;
+  aciklama: string;
+  tur: 'metin' | 'sayi' | 'evet_hayir' | 'adresler' | 'sifre' | 'adres';
+  en_az: number | null;
+  en_cok: number | null;
+  kaynak: 'panel' | '.env' | 'varsayilan';
+  deger: string | number | boolean | string[] | null;
+  dolu?: boolean;
+  cozulemedi?: boolean;
+}
+
+export interface AyarlarCevabi {
+  alanlar: AyarAlani[];
+  surum: number;
+  mesaj?: Mesaj;
+}
+
+// Bir API anahtarı (anahtarın kendisi sadece üretilirken bir kez gelir).
+export interface ApiAnahtari {
+  id: number;
+  ad: string;
+  rol: 'tam' | 'admin' | 'onaylayici' | null;
+  on_ek: string;
+  durum: 'aktif' | 'iptal' | 'suresi_doldu';
+  olusturan: string | null;
+  olusturuldu: string;
+  son_kullanma: string | null;
+  son_kullanim: string | null;
+  iptal: string | null;
+}
+
+export interface ApiAnahtarlariCevabi {
+  anahtarlar: ApiAnahtari[];
+  baslik?: string;
+  anahtar?: string;
+  mesaj?: Mesaj;
 }
