@@ -257,9 +257,11 @@ def test_panel_hesabi_olmadan_anahtarla_dokuman(ortam):
     assert dis.get("/api/dokuman/openapi.json").status_code == 401
     assert dis.get("/api/dokuman/openapi.json", headers={"X-API-Anahtari": "mvz_yanlis"}).status_code == 401
     sema = dis.get("/api/dokuman/openapi.json", headers={"X-API-Anahtari": anahtar}).json()
-    assert sema["servers"] == [{"url": "https://mevzuat.firma.com", "description": "Mevzuat Takip"}]
+    assert "servers" not in sema  # sayfadaki doküman istekleri kendi adresine atar
     json_ = dis.get("/api/dokuman/indir?bicim=json", headers={"X-API-Anahtari": anahtar})
     assert json_.status_code == 200 and "/api/v1/mevzuat" in json_.json()["paths"]
+    # İndirilen doküman bilgisayardan açılır ya da Postman'e yüklenir, sunucu adresini taşır.
+    assert json_.json()["servers"] == [{"url": "https://mevzuat.firma.com", "description": "Mevzuat Takip"}]
     # API kullanıcısı da oturumla indirebilir.
     _giris(client, "api@disfirma.com")
     assert client.get("/api/dokuman/indir?bicim=json").status_code == 200
