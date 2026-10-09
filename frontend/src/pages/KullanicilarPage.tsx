@@ -108,7 +108,7 @@ export const KullanicilarPage: React.FC<{ benimId: number }> = ({ benimId }) => 
       {/* Kullanıcı tablosu, ad, rol, son giriş, durum, işlemler. */}
       {veri && (
         <div className="bg-white rounded-xl border border-paper-300 shadow-xs overflow-x-auto">
-          <table className="w-full text-left text-xs min-w-[720px]">
+          <table className="yigin-tablo w-full text-left text-xs xl:min-w-[720px]">
             <thead className="bg-paper-100 border-b border-paper-300 text-stone-600 uppercase font-mono text-[11px]">
               <tr>
                 <th className="px-5 py-3 font-semibold">Kullanıcı</th>
@@ -121,11 +121,11 @@ export const KullanicilarPage: React.FC<{ benimId: number }> = ({ benimId }) => 
             <tbody className="divide-y divide-paper-200">
               {veri.kullanicilar.map((k) => (
                 <tr key={k.id} className={`hover:bg-paper-50 ${k.aktif ? '' : 'opacity-60'}`}>
-                  <td className="px-5 py-3">
+                  <td className="px-5 py-3" data-etiket="Kullanıcı">
                     <div className="font-semibold text-stone-900">{k.ad}{k.id === benimId && <span className="ml-1.5 text-[10px] text-stone-500">(siz)</span>}</div>
-                    <div className="text-[11px] font-mono text-stone-500">{k.eposta}</div>
+                    <div className="text-[11px] font-mono text-stone-500 break-all">{k.eposta}</div>
                   </td>
-                  <td className="px-5 py-3">
+                  <td className="px-5 py-3" data-etiket="Rol">
                     <span className="inline-flex items-center gap-1 text-stone-700">
                       {k.rol === 'admin' ? <Shield className="w-3.5 h-3.5 text-petrol" />
                         : k.rol === 'api' ? <BookOpen className="w-3.5 h-3.5 text-sky-700" />
@@ -133,13 +133,13 @@ export const KullanicilarPage: React.FC<{ benimId: number }> = ({ benimId }) => 
                       {ROL_ADI[k.rol]}
                     </span>
                   </td>
-                  <td className="px-5 py-3 text-stone-600">{tarihSaat(k.son_giris)}</td>
-                  <td className="px-5 py-3">
+                  <td className="px-5 py-3 text-stone-600" data-etiket="Son giriş">{tarihSaat(k.son_giris)}</td>
+                  <td className="px-5 py-3" data-etiket="Durum">
                     <DurumEtiketi k={k} />
                     {k.silinecek && <div className="mt-1 text-[11px] text-rose-700">{tarihSaat(k.silinecek)} silinecek</div>}
                   </td>
                   <td className="px-5 py-3">
-                    <div className="flex items-center justify-end gap-1.5">
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
                       {/* Aktif kullanıcıya link gönder düğmesi. */}
                       {k.aktif && (
                         <button onClick={() => linkGonder(k)} disabled={bekleyen === k.id || !veri.panel_adresi_var}
