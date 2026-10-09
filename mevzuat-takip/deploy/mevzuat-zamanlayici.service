@@ -1,0 +1,32 @@
+# Mevzuat Takip — zamanlayıcı (sürekli çalışır). Paneldeki tarama saatlerinde günlük işi (tara, onaya sun, sağlık
+# kontrolü) ayrı süreç olarak başlatır, paneldeki "Şimdi tara" isteklerini de o alır. Saatler panelden değişir.
+# Sunucu kapalıyken kaçan çalışmayı açılışta bir kez yapar.
+#
+# Kurulum:  cp deploy/mevzuat-zamanlayici.service /etc/systemd/system/ && systemctl enable --now mevzuat-zamanlayici
+# Kontrol:  journalctl -u mevzuat-zamanlayici -n 50   ("Sonraki çalışma: ...", "Günlük iş bitti (çıkış kodu 0 ...)")
+
+[Unit]
+Description=Mevzuat Takip zamanlayıcı (tarama saatleri panelden)
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=mevzuat
+Group=mevzuat
+WorkingDirectory=/opt/mevzuat/mevzuat-takip
+Environment=TZ=Europe/Istanbul HOME=/opt/mevzuat
+ExecStart=/usr/local/bin/uv run --frozen --no-dev python -m mevzuat.cli zamanlayici
+# Çökerse ya da veritabanı yeniden başlarken düşerse kendini toplar, nabız eskirse panel uyarır.
+Restart=always
+RestartSec=10
+# Durdurulunca süren tarama da biter, bir sonraki çalışma kaldığı yerden devam eder.
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mevzuat
+
+[Install]
+WantedBy=multi-user.target

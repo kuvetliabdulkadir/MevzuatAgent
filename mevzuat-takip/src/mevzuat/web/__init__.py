@@ -7,6 +7,7 @@ Gereken ayarlar aşağıda.
     MEVZUAT_GIZLI_ANAHTAR  oturum çerezini imzalar, en az 32 karakter olmalı ve gizli tutulmalı
     MEVZUAT_HTTPS=1        panel HTTPS arkasındaysa verilir, çerez sadece HTTPS'te gönderilir
     MEVZUAT_MFA=1          herkes için iki adımlı doğrulama (telefondaki doğrulayıcı uygulama) zorunlu olur
+    MEVZUAT_DOKUMAN_ACIK=0 API dokümanı (Swagger) da anahtar ister, varsayılan açık (istekler her durumda anahtar ister)
 
 Güvenlik modelinde JWT bilerek kullanılmadı.
   - Oturum imzalı, HttpOnly, SameSite=Strict bir çerezdir. JavaScript oturum bilgisine erişemez, tarayıcıda saklanan
@@ -18,19 +19,26 @@ Güvenlik modelinde JWT bilerek kullanılmadı.
 # Panelin sunucu tarafı (backend). Tarayıcıdaki React arayüzü buradaki /api/... adreslerine istek atar,
 # bu dosya da veritabanından okuyup/yazıp JSON cevap verir. Ayrıca derlenmiş arayüz dosyalarını sunar.
 # Her "@api.get/post/put(...)" satırı bir API adresi tanımlar, altındaki fonksiyon o adrese gelen isteği karşılar.
+import html
+import json
 import logging
 import os
 import secrets
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
 # FastAPI, Python web çatısı. APIRouter, API adreslerini gruplar. Depends, her istekte önce çalışacak kontrol. HTTPException, hata cevabı.
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Security
+from fastapi.openapi.utils import get_openapi
+from fastapi.security import HTTPBearer
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.routing import APIRoute
 # pydantic BaseModel gelen JSON'un yapısını tarif eder ve otomatik kontrol eder, eksik ya da yanlış tipte alan gelirse 422 hatası döner.
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -46,22 +54,37 @@ from mevzuat import (
     tanimlar,
     zamanlama,
 )
+from mevzuat import panel_ayarlari
 from mevzuat import rapor as rapor_modulu
-from mevzuat.db import AliciGrubu, Denetim, KaynakTanimi, KonuTanimi, Kullanici, ParolaLinki, Rapor
+from mevzuat.db import (
+    AliciGrubu, ApiAnahtari, Denetim, KaynakTanimi, KonuTanimi, Kullanici, MenuOgesi, ParolaLinki, Rapor,
+)
 from mevzuat.http import make_client
-from mevzuat.mail import DosyaGonderici, MailGonderici
-from mevzuat.web import guvenlik
+from mevzuat.mail import DosyaGonderici, Mail, MailGonderici
+from mevzuat.web import guvenlik, panel_belgesi, portal
 from mevzuat.web.guvenlik import denetle, giris_dene
 
 log = logging.getLogger(__name__)
 
 # Oturum 8 saat geçerli.
 OTURUM_SURESI = 8 * 60 * 60  # saniye, bir iş günü
-# Rol kuralları, kim ne yapabilir.
-KARAR_ROLU = "onaylayici"  # raporu onaylayıp reddedebilen tek rol
-GRUP_ROLLERI = ("admin", "onaylayici")  # alıcı gruplarını yönetebilenler (kullanıcının kararı, 2026-10-02)
-AYAR_ROLLERI = ("admin", "onaylayici")  # kaynak/konu yönetimi, asıl kullanıcı onaylayıcı, admin kurtarma (2026-10-02)
-KURTARMA_ROLU = "admin"  # kaynak/konu geçmişinden "önceki hale döndür" (yanlış hareketi geri almak)
+# Rol kuralları, kim ne yapabilir. "tam" sadece API anahtarlarının rolüdür (test ve entegrasyon için her şeyi yapar),
+# panel kullanıcısı bu role sahip olamaz, panelde görev ayrılığı aynen geçerlidir.
+TAM_ROL = "tam"
+KARAR_ROLLERI = ("onaylayici", TAM_ROL)  # raporu onaylayıp reddedebilenler, panelde sadece onaylayıcı
+GRUP_ROLLERI = ("admin", "onaylayici", TAM_ROL)  # alıcı gruplarını yönetebilenler (kullanıcının kararı, 2026-10-02)
+AYAR_ROLLERI = ("admin", "onaylayici", TAM_ROL)  # kaynak/konu yönetimi, asıl kullanıcı onaylayıcı, admin kurtarma (2026-10-02)
+# Kullanıcılar, ayarlar, denetim, API anahtarları, kaynak/konu geçmişinden "önceki hale döndür".
+KURTARMA_ROLLERI = ("admin", TAM_ROL)
+API_ROLU = "api"  # panele girer ama sadece API dokümanını görür, istek atmak için API anahtarı gerekir
+# API kullanıcısının oturumla erişebildiği adresler, gerisi API anahtarı ister.
+API_ROLU_ADRESLERI = ("/api/menu", "/api/dokuman/openapi.json", "/api/dokuman/indir", "/api/parolam")
+# Dış sistemlerin API anahtarını gönderdiği başlık.
+API_BASLIGI = "X-API-Anahtari"  # eski biçim, hâlâ kabul edilir ama dokümanda sadece "Authorization: Bearer" var
+# Aynı anahtarın son kullanım zamanı en fazla dakikada bir yazılır.
+SON_KULLANIM_ARALIGI = 60
+# Panel oturumuyla API dokümanını görebilenler. Onaylayıcı görmez, dışarıdan gelen API anahtarıyla doküman yine açılır.
+DOKUMAN_ROLLERI = ("admin", "api", TAM_ROL)
 # Parola doğrulandıktan sonra MFA kodunu girmek için 5 dakika süre.
 MFA_BEKLEME = 5 * 60  # saniye, parola doğrulandıktan sonra kodu girmek için süre
 # Derlenmiş arayüzün klasörü, proje/frontend/dist.
@@ -78,10 +101,67 @@ GUVENLIK_BASLIKLARI = {
 }
 
 
+# API dokümanında uç noktaların grupları, adresin /api/ sonrasındaki ilk parçasına göre.
+API_GRUPLARI = {
+    "oturum": "Oturum ve giriş", "giris": "Oturum ve giriş", "cikis": "Oturum ve giriş", "parolam": "Oturum ve giriş",
+    "parola-linki": "Oturum ve giriş", "menu": "Menü", "raporlar": "Raporlar ve onay", "gruplar": "Alıcı grupları",
+    "kaynaklar": "Kaynaklar", "kaynak-tipleri": "Kaynaklar", "konular": "Konular", "tarama": "Tarama",
+    "zamanlama": "Tarama", "kullanicilar": "Kullanıcılar", "denetim": "Denetim kaydı", "ayarlar": "Ayarlar",
+    "api-anahtarlari": "API anahtarları",
+}
+
+# Swagger sayfası. Dosyalar (frontend/public/swagger) kendi sunucumuzdan gelir, satır içi script yoktur, CSP bozulmaz.
+SWAGGER_SAYFASI = """<!doctype html>
+<html lang="tr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mevzuat Takip API</title><link rel="stylesheet" href="/swagger/swagger-ui.css">
+<link rel="stylesheet" href="/swagger/baslat.css"></head>
+<body><div id="anahtar-girisi"></div><div id="swagger-ui"></div>
+<script src="/swagger/swagger-ui-bundle.js"></script><script src="/swagger/baslat.js"></script></body>
+</html>"""
+
+
+# Panelin o anki işletim ayarları (mail göndericisi, PDF eki, MFA, panel adresi, pasif silme süresi).
+@dataclass(frozen=True)
+class Isletim:
+    gonderici: MailGonderici
+    ek_ekle: bool
+    mfa_zorunlu: bool
+    panel_adresi: str | None
+    pasif_silme_gun: int
+    dokuman_acik: bool
+
+    # SMTP ayarsızsa mailler sadece dosyaya yazılır, panel bunu "gönderildi" diye göstermemeli.
+    @property
+    def mail_kapali(self) -> bool:
+        return isinstance(self.gonderici, DosyaGonderici)
+
+
+# İndirilen doküman, Swagger dosyaları ve API tanımı içinde, internetsiz açılan tek HTML dosyası.
+def _tek_dosya_dokuman(sema: dict, klasor: Path) -> bytes:
+    css = (klasor / "swagger-ui.css").read_text(encoding="utf-8")
+    js = (klasor / "swagger-ui-bundle.js").read_text(encoding="utf-8").replace("</script", "<\\/script")
+    # JSON içindeki "</" script etiketini erken kapatmasın.
+    veri = json.dumps(sema, ensure_ascii=False).replace("</", "<\\/")
+    baslik = html.escape(sema.get("info", {}).get("title", "API"))
+    return (f'<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>{baslik}</title><style>{css}</style>'
+            f'</head><body><div id="swagger-ui"></div><script>{js}</script>'
+            f'<script>SwaggerUIBundle({{spec: {veri}, dom_id: "#swagger-ui"}});</script></body></html>').encode("utf-8")
+
+
+# İstekteki API anahtarı. X-API-Anahtari başlığında ya da "Authorization: Bearer ..." biçiminde gelir, yoksa None.
+def istek_anahtari(request: Request) -> str | None:
+    if (anahtar := request.headers.get(API_BASLIGI)) is not None:
+        return anahtar
+    yetki = request.headers.get("authorization", "")
+    return yetki[7:] if yetki[:7].lower() == "bearer " else None
+
+
 # --- istek gövdeleri
 
 # Aşağıdaki sınıflar, API'ye gelen isteklerin gövdeleri (JSON'da hangi alanlar olmalı). max_length, aşırı uzun veriyi reddet.
 class GirisIstegi(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"eposta": "onay@firma.com.tr", "parola": "parola-en-az-12"}]})
     eposta: str = Field(max_length=254)
     parola: str = Field(max_length=1024)
 
@@ -93,6 +173,7 @@ class KodIstegi(BaseModel):
 
 # Onay/ret isteği.
 class KararIstegi(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"karar": "onayla", "dahil": [101, 102], "notu": "Vergi kalemine dikkat.", "gruplar": [1, 2], "ek_adresler": ["mudur@firma.com.tr"]}]})
     karar: Literal["onayla", "reddet"]
     dahil: list[int] = []
     notu: str = Field("", max_length=2000)
@@ -103,14 +184,29 @@ class KararIstegi(BaseModel):
 
 # Onaylanmış rapordan ek gönderim isteği, seçilen kalemler, gruplar, kişiye özel adresler ve not.
 class EkGonderimIstegi(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"dahil": [103], "notu": "Size de gelsin.", "gruplar": [3], "ek_adresler": []}]})
     dahil: list[int] = []
     notu: str = Field("", max_length=2000)
     gruplar: list[int] = []
     ek_adresler: list[str] = Field(default_factory=list, max_length=50)
 
 
+# Panel ayarlarını kaydetme isteği. Değeri null olan ayar sıfırlanır (.env'e döner), gönderilmeyene dokunulmaz.
+class AyarIstegi(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"degisiklikler": {"smtp_gonderen_adi": "Uyum Birimi", "saklama_gun": 45, "panel_adresi": None}, "surum": 3}]})
+    degisiklikler: dict[str, str | int | bool | list[str] | None] = Field(max_length=50)
+    surum: int
+
+
+# Deneme maili isteği.
+class MailDenemeIstegi(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"adres": "bilgi-islem@firma.com.tr"}]})
+    adres: str = Field(max_length=200)
+
+
 # Alıcı grubu ekleme/düzenleme isteği.
 class GrupIstegi(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"ad": "Kuyum Ekibi", "is_kollari": ["Kuyum", "Ortak"], "adresler": ["kuyum@firma.com.tr"], "aktif": True}]})
     ad: str = Field(max_length=200)
     is_kollari: list[str] = []
     adresler: list[str] = []
@@ -119,9 +215,18 @@ class GrupIstegi(BaseModel):
 
 # Kullanıcı ekleme isteği.
 class KullaniciIstegi(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"eposta": "yeni@firma.com.tr", "ad": "Ad Soyad", "rol": "onaylayici"}]})
     eposta: str = Field(max_length=254)
     ad: str = Field(max_length=200)
-    rol: Literal["admin", "onaylayici"]
+    rol: Literal["admin", "onaylayici", "api"]
+
+
+# API anahtarı üretme isteği. gun boşsa anahtar süresizdir.
+class ApiAnahtariIstegi(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"ad": "Portal entegrasyonu", "rol": "tam", "gun": 90}]})
+    ad: str = Field(max_length=100)
+    rol: Literal["tam", "admin", "onaylayici"]
+    gun: int | None = None
 
 
 # Kullanıcıyı aktif/pasif yapma isteği.
@@ -143,6 +248,7 @@ class ParolaDegistirIstegi(BaseModel):
 
 # Kaynak ekleme/düzenleme/deneme isteği.
 class KaynakIstegi(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"tip": "rss", "etiket": "TCMB Basın Duyuruları", "ayarlar": {"akis_url": "https://www.tcmb.gov.tr/wps/wcm/connect/TR/TCMB+TR/Bottom+Menu/Diger/RSS/Basin+Duyurulari"}, "varsayilan_konular": [], "aktif": True}]})
     tip: str = Field("", max_length=30)  # sadece eklerken, düzenlemede tip değişmez
     etiket: str = Field(max_length=300)
     ayarlar: dict = Field(default_factory=dict)
@@ -163,6 +269,7 @@ class SurumIstegi(BaseModel):
 
 # Tarama saatleri isteği.
 class ZamanlamaIstegi(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"saatler": ["06:30", "12:00", "18:00"], "surum": 2}]})
     saatler: list[str] = Field(max_length=10)
     surum: int
 
@@ -175,6 +282,7 @@ class GeriAlIstegi(BaseModel):
 
 # Konu ekleme/düzenleme/önizleme isteği.
 class KonuIstegi(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"ad": "Döviz ve kambiyo", "is_kollari": ["Döviz/Altın"], "kelimeler": ["döviz", "politika faizi"], "haric": [], "dislanan": [], "aciklama": "Kur ve faiz kararları fiyatlamayı etkiler."}]})
     ad: str = Field(max_length=300)
     is_kollari: list[str] = Field(default_factory=list, max_length=50)
     kelimeler: list[str] = Field(default_factory=list, max_length=500)
@@ -195,8 +303,9 @@ def _zaman(z) -> str | None:
 # Giriş yapan kullanıcının arayüze gönderilen bilgisi, arayüz hangi menüyü göstereceğine bunlara bakarak karar verir.
 def _kullanici_json(k: Kullanici) -> dict:
     return {"id": k.id, "ad": k.ad, "eposta": k.eposta, "rol": k.rol, "mfa_aktif": k.mfa_aktif,
-            "karar_verebilir": k.rol == KARAR_ROLU, "grup_yonetebilir": k.rol in GRUP_ROLLERI,
-            "ayar_yonetebilir": k.rol in AYAR_ROLLERI, "kurtarma_yapabilir": k.rol == KURTARMA_ROLU}
+            "karar_verebilir": k.rol in KARAR_ROLLERI, "grup_yonetebilir": k.rol in GRUP_ROLLERI,
+            "ayar_yonetebilir": k.rol in AYAR_ROLLERI, "kurtarma_yapabilir": k.rol in KURTARMA_ROLLERI,
+            "api_kullanicisi": k.rol == API_ROLU}
 
 
 # Kullanıcılar sayfasındaki satır.
@@ -231,13 +340,18 @@ def uygulama_olustur(
     arayuz: Path | None = VARSAYILAN_ARAYUZ,
     panel_adresi: str | None = None,  # davet/sıfırlama maillerindeki link (MEVZUAT_PANEL_ADRESI)
     pasif_silme_gun: int = guvenlik.PASIF_SILME_GUN,  # sadece ekranda gösterilir, silmeyi günlük iş yapar
+    dokuman_acik: bool = False,  # API dokümanı anahtarsız açılsın mı (sunucuda varsayılan açık, MEVZUAT_DOKUMAN_ACIK)
+    ayar_oku: Callable[[Session], dict] | None = None,  # verilirse yukarıdaki ayarlar her istekte buradan okunur
 ) -> FastAPI:
     # Gizli anahtar kısaysa çalışma (çerez imzası tahmin edilebilir olur).
     if len(gizli_anahtar) < 32:
         raise ValueError("MEVZUAT_GIZLI_ANAHTAR en az 32 karakter olmalı (ör. python -c \"import secrets; print(secrets.token_urlsafe(48))\")")
 
     # FastAPI uygulaması, otomatik API dokümanı sayfaları kapalı.
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)  # API dokümanı dışarı açılmaz
+    # Hazır doküman adresleri kapalı. Doküman /api/dokuman adresinde, sadece giriş yapmış kullanıcıya açılır.
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, title="Mevzuat Takip API", version="1.0",
+                  description="Mevzuat Takip panelinin API'si. Bütün uç noktalar oturum çerezi ister, veri değiştiren "
+                              "istekler ayrıca X-CSRF-Token başlığı ister (bu sayfa kendisi ekler).")
     # Oturum çerezi, imzalı, 8 saat, sadece aynı siteden gönderilir, HTTPS ayarlıysa sadece HTTPS'te.
     app.add_middleware(
         SessionMiddleware,
@@ -249,8 +363,15 @@ def uygulama_olustur(
     )
     # Veritabanı oturumu üreten fabrika.
     Oturum = sessionmaker(engine)
-    # SMTP ayarsızsa mailler sadece dosyaya yazılır, panel bunu "gönderildi" diye göstermemeli.
-    mail_kapali = isinstance(gonderici, DosyaGonderici)
+    # O anki ayarlar. Sunucuda panelden değişen ayarlar her istekte okunur (ayar_oku), testlerde verilen değerler sabittir.
+    sabit = Isletim(gonderici, ek_ekle, mfa_zorunlu, panel_adresi, pasif_silme_gun, dokuman_acik)
+
+    def ayar(db: Session) -> Isletim:
+        if ayar_oku is None:
+            return sabit
+        a = ayar_oku(db)
+        return Isletim(panel_ayarlari.gonderici(a), a["ek_ekle"], a["mfa_zorunlu"], a["panel_adresi"], a["pasif_silme_gun"],
+                       a["dokuman_acik"])
 
     # Her cevaba güvenlik başlıklarını ekleyen ara katman.
     @app.middleware("http")
@@ -278,6 +399,9 @@ def uygulama_olustur(
         Başka bir site kullanıcının tarayıcısından istek gönderse bile bu başlığı koyamaz."""
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return
+        # API anahtarıyla gelen istek çerezle değil anahtarla tanınır. Başka bir site tarayıcıdan bu başlığı koyamaz.
+        if istek_anahtari(request):
+            return
         beklenen = request.session.get("csrf")
         gelen = request.headers.get("x-csrf-token", "")
         if not beklenen or not secrets.compare_digest(beklenen, gelen):
@@ -294,19 +418,43 @@ def uygulama_olustur(
             and kullanici.aktif  # pasifleştirilen kullanıcının açık oturumu da biter
             and secrets.compare_digest(request.session.get("iz", ""), guvenlik.oturum_izi(kullanici))
             # MFA sonradan zorunlu yapıldıysa, kodsuz açılmış eski oturumlar geçmez.
-            and (request.session.get("mfa") or not guvenlik.mfa_gerekli(kullanici, mfa_zorunlu))
+            and (request.session.get("mfa") or not guvenlik.mfa_gerekli(kullanici, ayar(db).mfa_zorunlu))
         )
         if not gecerli:
             request.session.clear()
             return None
         return kullanici
 
-    # Giriş yapılmamışsa 401 hatası ver.
+    # Giriş yapılmamışsa 401 hatası ver. API anahtarı gönderildiyse çerez değil anahtar geçerlidir.
     def giris_gerekli(request: Request, db: Session) -> Kullanici:
+        anahtar = istek_anahtari(request)
+        if anahtar is not None:
+            return api_anahtari_gerekli(request, db, anahtar)
         kullanici = oturum_kullanicisi(request, db)
         if kullanici is None:
             raise HTTPException(401, "Giriş yapmanız gerekiyor.")
+        # API kullanıcısı panelde sadece dokümanı görür, istek atmak için API anahtarı kullanır.
+        if kullanici.rol == API_ROLU and request.url.path not in API_ROLU_ADRESLERI:
+            raise HTTPException(403, "API kullanıcısı bu adrese oturumla erişemez, API anahtarı gönderin.")
         return kullanici
+
+    # API anahtarının hesabı. Geçersizse 401. Her istek denetim kaydına yazılır.
+    def api_anahtari_gerekli(request: Request, db: Session, anahtar: str) -> Kullanici:
+        anahtar = anahtar.strip()
+        bulunan = guvenlik.api_anahtari_hesabi(db, anahtar)
+        if bulunan is None:
+            # Anahtarın kendisi yazılmaz, sadece neden tutmadığını anlamaya yarayan ilk harfleri ve uzunluğu.
+            denetle(db, "api_anahtari_gecersiz", None, ip(request), yol=request.url.path, on_ek=anahtar[:10],
+                    uzunluk=len(anahtar), durum=guvenlik.api_anahtari_durumu(db, anahtar))
+            db.commit()
+            raise HTTPException(401, "API anahtarı geçersiz, süresi dolmuş ya da iptal edilmiş.")
+        kayit, hesap = bulunan
+        simdi = datetime.now()
+        if kayit.son_kullanim is None or (simdi - kayit.son_kullanim).total_seconds() > SON_KULLANIM_ARALIGI:
+            kayit.son_kullanim = simdi
+        denetle(db, "api_istegi", hesap.id, ip(request), anahtar_id=kayit.id, yontem=request.method, yol=request.url.path)
+        db.commit()
+        return hesap
 
     # Parolası doğru girilmiş, MFA kodunu bekleyen kullanıcı.
     def mfa_bekleyen(request: Request, db: Session) -> Kullanici | None:
@@ -333,8 +481,10 @@ def uygulama_olustur(
         request.session["mfa"] = mfa_ile
         csrf(request)
 
+    # API anahtarının iki biçimi dokümanda "Authorize" düğmesi olarak görünür, kontrolü giris_gerekli yapar.
+    anahtar_semalari = [Security(HTTPBearer(auto_error=False, description="API anahtarı: Authorization: Bearer mvz_..."))]
     # Bütün /api adreslerinin grubu, her istekte önce CSRF kontrolü çalışır.
-    api = APIRouter(prefix="/api", dependencies=[Depends(csrf_dogrula)])
+    api = APIRouter(prefix="/api", dependencies=[Depends(csrf_dogrula), *anahtar_semalari])
 
     # --- oturum, giriş, çıkış
 
@@ -347,17 +497,18 @@ def uygulama_olustur(
             bekleyen = None if kullanici else mfa_bekleyen(request, db)
             mfa = ("kod" if bekleyen.mfa_aktif else "kurulum") if bekleyen else None
             return {"csrf": csrf(request), "kullanici": _kullanici_json(kullanici) if kullanici else None, "mfa": mfa,
-                    "mail_kapali": bool(kullanici) and mail_kapali}
+                    "mail_kapali": bool(kullanici) and ayar(db).mail_kapali}
 
     # E-posta ve parolayla giriş.
     @api.post("/giris")
     def giris(request: Request, istek: GirisIstegi):
         with Oturum() as db:
-            kullanici = giris_dene(db, istek.eposta, istek.parola, ip(request), mfa_zorunlu)
+            zorunlu = ayar(db).mfa_zorunlu
+            kullanici = giris_dene(db, istek.eposta, istek.parola, ip(request), zorunlu)
             if kullanici is None:
                 raise HTTPException(400, "E-posta veya parola hatalı ya da hesap geçici olarak kilitli.")
             # MFA gerekiyorsa oturumu açma, sadece "kod bekleniyor" bilgisini sakla.
-            if guvenlik.mfa_gerekli(kullanici, mfa_zorunlu):
+            if guvenlik.mfa_gerekli(kullanici, zorunlu):
                 request.session.clear()
                 request.session["mfa_kid"] = kullanici.id
                 request.session["mfa_baslangic"] = int(time.time())
@@ -473,7 +624,7 @@ def uygulama_olustur(
             kullanici = giris_gerekli(request, db)
             # Görev ayrılığı, sistemi yöneten (admin) rapor onaylamaz/reddetmez, bu iş onaylayıcınındır.
             # Arayüz admin'e butonları hiç göstermez, bu kontrol doğrudan isteklere karşı.
-            if kullanici.rol != KARAR_ROLU:
+            if kullanici.rol not in KARAR_ROLLERI:
                 denetle(db, "yetkisiz_karar_denemesi", kullanici.id, ip(request), rapor_id=rapor_id, rol=kullanici.rol)
                 db.commit()
                 raise HTTPException(403, "Bu işlem için yetkiniz yok.")
@@ -503,10 +654,11 @@ def uygulama_olustur(
 
     # Bekleyen mailleri gönderir ve sonucu panelde gösterilecek mesaja çevirir.
     def dagit_ve_bildir(db: Session, rapor: Rapor, bas: str, adres_sayisi: int) -> dict:
+        a = ayar(db)
         with make_client() as client:
-            gitti = rapor_modulu.dagit(db, client, gonderici, rapor, ek_ekle)
-        if gitti and mail_kapali:
-            return {"tur": "hata", "mesaj": f"{bas} ama mail GÖNDERİLMEDİ: mail sunucusu (MEVZUAT_SMTP_HOST) "
+            gitti = rapor_modulu.dagit(db, client, a.gonderici, rapor, a.ek_ekle)
+        if gitti and a.mail_kapali:
+            return {"tur": "hata", "mesaj": f"{bas} ama mail GÖNDERİLMEDİ: mail sunucusu (Ayarlar sayfası) "
                     f"ayarlı değil, {adres_sayisi} adrese gidecek mail sunucudaki giden_mailler/ klasörüne yazıldı."}
         if gitti:
             return {"tur": "basari", "mesaj": f"{bas} ve {adres_sayisi} adrese gönderildi."}
@@ -522,7 +674,7 @@ def uygulama_olustur(
         with Oturum() as db:
             kullanici = giris_gerekli(request, db)
             # Onay gibi ek gönderim de sadece onaylayıcının işidir.
-            if kullanici.rol != KARAR_ROLU:
+            if kullanici.rol not in KARAR_ROLLERI:
                 denetle(db, "yetkisiz_ek_gonderim_denemesi", kullanici.id, ip(request), rapor_id=rapor_id, rol=kullanici.rol)
                 db.commit()
                 raise HTTPException(403, "Bu işlem için yetkiniz yok.")
@@ -822,7 +974,7 @@ def uygulama_olustur(
     # "Önceki hale döndür" yetkisi, sadece admin.
     def kurtarma_yetkisi(request: Request, db: Session) -> Kullanici:
         kullanici = ayar_yetkisi(request, db)
-        if kullanici.rol != KURTARMA_ROLU:
+        if kullanici.rol not in KURTARMA_ROLLERI:
             denetle(db, "yetkisiz_kurtarma_denemesi", kullanici.id, ip(request), rol=kullanici.rol)
             db.commit()
             raise HTTPException(403, "Önceki hale döndürme sadece yöneticiye (admin) açık.")
@@ -924,7 +1076,7 @@ def uygulama_olustur(
     # Sadece admin'in yapabildiği işler için kontrol, yetkisiz deneme denetime yazılır.
     def admin_gerekli(request: Request, db: Session, islem: str) -> Kullanici:
         kullanici = giris_gerekli(request, db)
-        if kullanici.rol != KURTARMA_ROLU:
+        if kullanici.rol not in KURTARMA_ROLLERI:
             denetle(db, "yetkisiz_yonetim_denemesi", kullanici.id, ip(request), istek=islem, rol=kullanici.rol)
             db.commit()
             raise HTTPException(403, "Bu işlem için yetkiniz yok.")
@@ -935,22 +1087,24 @@ def uygulama_olustur(
         bekleyen = set(db.scalars(select(ParolaLinki.kullanici_id).where(
             ParolaLinki.tur == "davet", ParolaLinki.kullanildi.is_(None), ParolaLinki.son_gecerlilik > datetime.now())))
         hic_girmemis = {k.id for k in db.scalars(select(Kullanici).where(Kullanici.son_giris.is_(None)))}
-        # Silinmiş hesaplar listede görünmez.
-        return [_yonetim_json(k, k.id in bekleyen and k.id in hic_girmemis, pasif_silme_gun)
-                for k in db.scalars(select(Kullanici).where(Kullanici.silindi.is_(None))
+        # Silinmiş hesaplar ve API anahtarlarının hesapları listede görünmez.
+        gun = ayar(db).pasif_silme_gun
+        return [_yonetim_json(k, k.id in bekleyen and k.id in hic_girmemis, gun)
+                for k in db.scalars(select(Kullanici).where(Kullanici.silindi.is_(None), Kullanici.api_hesabi.is_(False))
                                     .order_by(Kullanici.aktif.desc(), Kullanici.ad))]
 
     # Kişiye davet ya da parola sıfırlama linki mail atar.
     def link_gonder(db: Session, hedef: Kullanici, yapan: Kullanici, request: Request) -> str | None:
         """Davet linki (kişi hiç giriş yapmamışsa) ya da sıfırlama linki maili gönderir. Mail gitmediyse hata mesajını döner."""
-        if not panel_adresi:
-            return "MEVZUAT_PANEL_ADRESI tanımlı değil; link gönderilemedi. Sunucu yöneticisine bildirin."
+        a = ayar(db)
+        if not a.panel_adresi:
+            return "Panel adresi tanımlı değil; link gönderilemedi. Ayarlar sayfasından panel adresini girin."
         tur = "davet" if hedef.son_giris is None else "sifirlama"
         token, son = guvenlik.parola_linki_olustur(db, hedef, tur, yapan.id)
         denetle(db, f"parola_linki_{tur}", yapan.id, ip(request), hedef=hedef.eposta)
         db.commit()  # mail gitse de gitmese de link kaydı ve denetim kalsın
         try:
-            gonderici.gonder(guvenlik.parola_linki_maili(hedef, f"{panel_adresi}/?parola={token}", tur, son, yapan.ad))
+            a.gonderici.gonder(guvenlik.parola_linki_maili(hedef, f"{a.panel_adresi}/?parola={token}", tur, son, yapan.ad))
         except Exception as e:
             return f"Mail gönderilemedi ({e.__class__.__name__}). Mail ayarlarını kontrol edip tekrar link gönderin."
         return None
@@ -960,8 +1114,9 @@ def uygulama_olustur(
     def kullanici_listesi(request: Request):
         with Oturum() as db:
             admin_gerekli(request, db, "kullanici_listesi")
-            return {"kullanicilar": kullanicilar_json(db), "panel_adresi_var": bool(panel_adresi),
-                    "pasif_silme_gun": pasif_silme_gun}
+            a = ayar(db)
+            return {"kullanicilar": kullanicilar_json(db), "panel_adresi_var": bool(a.panel_adresi),
+                    "pasif_silme_gun": a.pasif_silme_gun}
 
     # Yeni kullanıcı ekler, kişiye davet maili gider.
     @api.post("/kullanicilar")
@@ -989,7 +1144,7 @@ def uygulama_olustur(
         with Oturum() as db:
             yapan = admin_gerekli(request, db, "parola_linki")
             hedef = db.get(Kullanici, kullanici_id)
-            if hedef is None:
+            if hedef is None or hedef.api_hesabi:
                 raise HTTPException(404, "Kullanıcı bulunamadı.")
             if not hedef.aktif:
                 raise HTTPException(400, "Pasif kullanıcıya link gönderilmez; önce yeniden açın.")
@@ -1004,7 +1159,7 @@ def uygulama_olustur(
         with Oturum() as db:
             yapan = admin_gerekli(request, db, "aktiflik")
             hedef = db.get(Kullanici, kullanici_id)
-            if hedef is None:
+            if hedef is None or hedef.api_hesabi:
                 raise HTTPException(404, "Kullanıcı bulunamadı.")
             try:
                 guvenlik.aktiflik_degistir(db, hedef, istek.aktif, yapan, ip(request))
@@ -1069,23 +1224,199 @@ def uygulama_olustur(
             return {"kayitlar": kayitlar, "islemler": islemler,
                     "kullanicilar": [{"id": i, "ad": a} for i, a in sorted(adlar.items(), key=lambda x: x[1])]}
 
-    # API adreslerini uygulamaya ekle.
+    # --- panel ayarları (sadece admin)
+
+    # Panelden değiştirilebilen ayarlar, her birinin değeri ve nereden geldiği (panel, .env, varsayılan). Şifre gönderilmez.
+    @api.get("/ayarlar")
+    def ayarlari_getir(request: Request):
+        with Oturum() as db:
+            admin_gerekli(request, db, "ayarlari_getir")
+            return panel_ayarlari.panel_gorunumu(db, gizli_anahtar)
+
+    # Ayarları kaydeder. Değişen ayarların adları denetim kaydına yazılır, değerleri yazılmaz (şifre olabilir).
+    @api.put("/ayarlar")
+    def ayarlari_kaydet(request: Request, istek: AyarIstegi):
+        with Oturum() as db:
+            kullanici = admin_gerekli(request, db, "ayarlari_kaydet")
+            try:
+                degisen = panel_ayarlari.kaydet(db, istek.degisiklikler, istek.surum, kullanici.id, gizli_anahtar)
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+            except panel_ayarlari.CakismaHatasi as e:
+                raise HTTPException(409, str(e))
+            if degisen:
+                denetle(db, "panel_ayarlari", kullanici.id, ip(request), degisen=degisen)
+            db.commit()
+            return {**panel_ayarlari.panel_gorunumu(db, gizli_anahtar),
+                    "mesaj": {"tur": "basari", "mesaj": f"{len(degisen)} ayar kaydedildi." if degisen else "Değişiklik yok."}}
+
+    # Geçerli mail ayarıyla tek bir adrese deneme maili atar.
+    @api.post("/ayarlar/mail-dene")
+    def ayar_mail_dene(request: Request, istek: MailDenemeIstegi):
+        with Oturum() as db:
+            kullanici = admin_gerekli(request, db, "ayar_mail_dene")
+            adresler, hatali = alicilar.adresleri_ayikla(istek.adres)
+            if hatali or len(adresler) != 1:
+                raise HTTPException(400, "Tek bir geçerli e-posta adresi yazın.")
+            a = ayar(db)
+            if a.mail_kapali:
+                return {"tur": "hata", "mesaj": "SMTP sunucusu tanımlı değil, mail gönderilmez."}
+            simdi = datetime.now().strftime("%d.%m.%Y %H:%M")
+            metin = f"Bu bir deneme mailidir ({simdi}). Mail ayarları çalışıyor, bir şey yapmanıza gerek yok."
+            try:
+                a.gonderici.gonder(Mail(konu=f"Mevzuat Takip — deneme maili ({simdi})", html=f"<p>{metin}</p>",
+                                        metin=metin, alicilar=adresler))
+            except Exception as e:
+                return {"tur": "hata", "mesaj": f"Mail gönderilemedi: {e.__class__.__name__}: {str(e)[:200]}"}
+            finally:
+                denetle(db, "ayar_mail_dene", kullanici.id, ip(request), adres=adresler[0])
+                db.commit()
+            return {"tur": "basari", "mesaj": f"Deneme maili {adresler[0]} adresine gönderildi."}
+
+    # --- API anahtarları (sadece panele giriş yapmış admin, anahtarla anahtar yönetilmez)
+
+    def anahtar_yoneticisi(request: Request, db: Session, islem: str) -> Kullanici:
+        if istek_anahtari(request):
+            raise HTTPException(403, "API anahtarları sadece panelden yönetilir.")
+        return admin_gerekli(request, db, islem)
+
+    def anahtar_json(k: ApiAnahtari, hesap: Kullanici | None, adlar: dict[int, str]) -> dict:
+        simdi = datetime.now()
+        durum = ("iptal" if k.iptal else "suresi_doldu" if k.son_kullanma and k.son_kullanma <= simdi else "aktif")
+        return {"id": k.id, "ad": k.ad, "rol": hesap.rol if hesap else None, "on_ek": k.on_ek, "durum": durum,
+                "olusturan": adlar.get(k.olusturan_id), "olusturuldu": _zaman(k.olusturuldu),
+                "son_kullanma": _zaman(k.son_kullanma), "son_kullanim": _zaman(k.son_kullanim), "iptal": _zaman(k.iptal)}
+
+    def anahtar_listesi(db: Session) -> list[dict]:
+        anahtarlar = list(db.scalars(select(ApiAnahtari).order_by(ApiAnahtari.id.desc())))
+        hesaplar = {k.id: k for k in db.scalars(select(Kullanici).where(
+            Kullanici.id.in_({a.kullanici_id for a in anahtarlar} | {a.olusturan_id for a in anahtarlar if a.olusturan_id})))}
+        adlar = {i: k.ad for i, k in hesaplar.items()}
+        return [anahtar_json(a, hesaplar.get(a.kullanici_id), adlar) for a in anahtarlar]
+
+    @api.get("/api-anahtarlari")
+    def api_anahtarlari(request: Request):
+        """API anahtarlarının listesi. Anahtarın kendisi listede yoktur, sadece ilk harfleri."""
+        with Oturum() as db:
+            anahtar_yoneticisi(request, db, "api_anahtarlari")
+            return {"anahtarlar": anahtar_listesi(db), "baslik": "Authorization: Bearer"}
+
+    @api.post("/api-anahtarlari")
+    def api_anahtari_uret(request: Request, istek: ApiAnahtariIstegi):
+        """Yeni anahtar üretir. Anahtar sadece bu cevapta bir kez gösterilir."""
+        with Oturum() as db:
+            yapan = anahtar_yoneticisi(request, db, "api_anahtari_uret")
+            try:
+                kayit, anahtar = guvenlik.api_anahtari_uret(db, istek.ad, istek.rol, istek.gun, yapan, ip(request))
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+            db.commit()
+            return {"anahtar": anahtar, "anahtarlar": anahtar_listesi(db),
+                    "mesaj": {"tur": "basari", "mesaj": f"'{kayit.ad}' anahtarı üretildi. Anahtarı şimdi kopyalayın, "
+                              "bir daha gösterilmeyecek."}}
+
+    @api.post("/api-anahtarlari/{anahtar_id}/iptal")
+    def api_anahtari_iptal(request: Request, anahtar_id: int):
+        with Oturum() as db:
+            yapan = anahtar_yoneticisi(request, db, "api_anahtari_iptal")
+            kayit = db.get(ApiAnahtari, anahtar_id)
+            if kayit is None:
+                raise HTTPException(404, "Anahtar bulunamadı.")
+            guvenlik.api_anahtari_iptal(db, kayit, yapan, ip(request))
+            db.commit()
+            return {"anahtarlar": anahtar_listesi(db),
+                    "mesaj": {"tur": "basari", "mesaj": f"'{kayit.ad}' anahtarı iptal edildi, artık çalışmaz."}}
+
+    # --- menü ve API dokümanı
+
+    # Menü öğesinin yetkisi bu kullanıcıda var mı. Bilinmeyen yetki kimseye gösterilmez.
+    def menu_yetkisi(kullanici: Kullanici, yetki: str) -> bool:
+        return {"herkes": True, "panel": kullanici.rol != API_ROLU, "grup": kullanici.rol in GRUP_ROLLERI,
+                "ayar": kullanici.rol in AYAR_ROLLERI, "kurtarma": kullanici.rol in KURTARMA_ROLLERI,
+                "dokuman": kullanici.rol in DOKUMAN_ROLLERI}.get(yetki, False)
+
+    # Sol menü veritabanından gelir.
+    @api.get("/menu")
+    def menu(request: Request):
+        """Sol menü. Kullanıcının yetkisine uyan aktif öğeler, sırasıyla. `adres` doluysa öğe yeni sekmede açılan bağlantıdır."""
+        with Oturum() as db:
+            kullanici = giris_gerekli(request, db)
+            ogeler = db.scalars(select(MenuOgesi).where(MenuOgesi.aktif).order_by(MenuOgesi.sira, MenuOgesi.anahtar))
+            return [{"anahtar": o.anahtar, "etiket": o.etiket, "aciklama": o.aciklama, "ikon": o.ikon, "adres": o.adres}
+                    for o in ogeler if menu_yetkisi(kullanici, o.yetki)]
+
+    # API'nin OpenAPI tanımı. Panele giriş yapmış kullanıcı ya da geçerli API anahtarı ister.
+    # Panel adresi tanımlıysa tanıma sunucu adresi olarak yazılır (Postman gibi araçlar istekleri oraya atar).
+    def openapi_semasi(db: Session) -> dict:
+        sema = get_openapi(title="Mevzuat Takip API", version="1.0", description=panel_belgesi.ACIKLAMA,
+                           routes=[*portal_yolu.routes, *api.routes], tags=panel_belgesi.ETIKETLER)
+        adres = ayar(db).panel_adresi
+        if adres:
+            sema["servers"] = [{"url": adres, "description": "Mevzuat Takip"}]
+        return sema
+
+    # Oturumla gelen onaylayıcı dokümanı göremez, anahtarla gelen (dış sistem) görür.
+    def dokuman_gerekli(request: Request, db: Session) -> None:
+        # Doküman açıksa (varsayılan) kimse sorulmaz. Şirket portalı paneli kullanmaz, dokümanı doğrudan açar.
+        if ayar(db).dokuman_acik:
+            return
+        kullanici = giris_gerekli(request, db)
+        if istek_anahtari(request) is None and kullanici.rol not in DOKUMAN_ROLLERI:
+            raise HTTPException(403, "API dokümanına erişim yetkiniz yok.")
+
+    @api.get("/dokuman/openapi.json", include_in_schema=False)
+    def openapi_tanimi(request: Request):
+        with Oturum() as db:
+            dokuman_gerekli(request, db)
+            return openapi_semasi(db)
+
+    # Swagger sayfasının kabuğu herkese açılır, içinde veri yoktur. Doküman açıksa (varsayılan) Swagger doğrudan gelir,
+    # kapalıysa sayfa API anahtarı ister ve doküman (openapi.json) ancak oturumla ya da geçerli anahtarla gelir.
+    @api.get("/dokuman", include_in_schema=False)
+    def api_dokumani():
+        return HTMLResponse(SWAGGER_SAYFASI)
+
+    # Dokümanı dosya olarak verir. html, internet ve giriş gerektirmeden açılan tek dosya. json, Postman gibi araçlara yüklenir.
+    @api.get("/dokuman/indir", include_in_schema=False)
+    def api_dokumani_indir(request: Request, bicim: Literal["html", "json"] = "html"):
+        with Oturum() as db:
+            dokuman_gerekli(request, db)
+            sema = openapi_semasi(db)
+        tarih = datetime.now().strftime("%Y%m%d")
+        if bicim == "json":
+            return JSONResponse(sema, headers={"Content-Disposition": f'attachment; filename="mevzuat-api-{tarih}.json"'})
+        klasor = (arayuz / "swagger") if arayuz else None
+        if klasor is None or not (klasor / "swagger-ui-bundle.js").is_file():
+            raise HTTPException(503, "Swagger dosyaları bulunamadı, arayüz derlenmemiş.")
+        return Response(_tek_dosya_dokuman(sema, klasor), media_type="text/html; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="mevzuat-api-{tarih}.html"'})
+
+    # Her uç noktanın başlığı, açıklaması, yetkisi ve hata cevapları (web/panel_belgesi.py).
+    panel_belgesi.belgele(api.routes)
+    # Dokümanda uç noktalar adreslerine göre gruplanır.
+    for yol in api.routes:
+        if isinstance(yol, APIRoute):
+            yol.tags = [API_GRUPLARI.get(yol.path.split("/")[2], "Diğer")]
+    # Mevzuat arama ve okuma adresleri (/api/v1), sürümlü, dokümanın ilk grubu.
+    portal_yolu = portal.portal_api(Oturum, giris_gerekli, [Depends(csrf_dogrula), *anahtar_semalari])
+    # API adreslerini uygulamaya ekle. Portal önce, /api/{...} genel adresi ona da 404 vermesin.
+    app.include_router(portal_yolu)
     app.include_router(api)
 
     # --- sağlık ve arayüz dosyaları
 
     # Sağlık kontrolü adresi (Docker "panel ayakta mı" diye buna bakıyor).
-    @app.get("/saglik", response_class=PlainTextResponse)
+    @app.get("/saglik", response_class=PlainTextResponse, include_in_schema=False)
     def saglik() -> str:
         return "ok"
 
     # Bilinmeyen /api adresine 404.
-    @app.get("/api/{yol:path}")
+    @app.get("/api/{yol:path}", include_in_schema=False)
     def api_bulunamadi(yol: str):
         return JSONResponse({"detail": "Bulunamadı."}, status_code=404)
 
     # Diğer bütün adresler, derlenmiş arayüz dosyaları.
-    @app.get("/{yol:path}")
+    @app.get("/{yol:path}", include_in_schema=False)
     def arayuz_dosyasi(yol: str):
         """Derlenmiş React arayüzü. Dosya varsa onu, yoksa index.html'i döner (arayüz tek sayfa)."""
         if arayuz is None or not (arayuz / "index.html").is_file():
@@ -1105,25 +1436,23 @@ def ayardan_olustur() -> FastAPI:
     from dotenv import load_dotenv
 
     from mevzuat.db import make_engine
-    from mevzuat.mail import gonderici_ayardan, panel_adresi_ayardan
 
     load_dotenv()
     anahtar = os.environ.get("MEVZUAT_GIZLI_ANAHTAR", "")
     engine = make_engine()
     tanimlar.hazirla(engine)
     arayuz = os.environ.get("MEVZUAT_ARAYUZ")
-    panel_adresi = panel_adresi_ayardan()
-    if not panel_adresi:
-        log.warning("MEVZUAT_PANEL_ADRESI boş: onay maillerinde panel düğmesi olmaz, davet/parola linkleri gönderilemez.")
+    # Mail, panel adresi, MFA gibi ayarlar her istekte okunur, panelden değişince yeniden başlatma gerekmez.
+    with Session(engine) as db:
+        ilk = panel_ayarlari.etkin(db, anahtar)
+    if not ilk["panel_adresi"]:
+        log.warning("Panel adresi boş: onay maillerinde panel düğmesi olmaz, davet/parola linkleri gönderilemez.")
     return uygulama_olustur(
         engine=engine,
-        gonderici=gonderici_ayardan(),
+        gonderici=panel_ayarlari.gonderici(ilk),
         is_kollari=None,  # grup formundaki iş kolları her istekte DB'deki konulardan
         gizli_anahtar=anahtar,
-        ek_ekle=os.environ.get("MEVZUAT_EK_EKLE", "1") != "0",
         https=os.environ.get("MEVZUAT_HTTPS") == "1",
-        mfa_zorunlu=os.environ.get("MEVZUAT_MFA") == "1",
         arayuz=Path(arayuz) if arayuz else VARSAYILAN_ARAYUZ,
-        panel_adresi=panel_adresi,
-        pasif_silme_gun=guvenlik.pasif_silme_gunu(),
+        ayar_oku=lambda db: panel_ayarlari.etkin(db, anahtar),
     )

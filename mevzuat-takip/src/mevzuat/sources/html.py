@@ -19,6 +19,9 @@ ya da yanlış bir sayfa sunucuyu şirket içi ağa istek atmaya yönlendiremez.
 # Bu dosya, "duyuru listesi düz bir web sayfası olan" siteleri okur (ör. Rekabet Kurumu).
 # Sayfayı indirir, ortak liste okuyucusuna (liste.py) verir. Her indirmeden önce adresi güvenlik kontrolünden geçirir.
 
+# Yönlendirme adresi göreli olabilir, tam adrese çevirmek için.
+from urllib.parse import urljoin
+
 # İnternetten sayfa indirmek için.
 import httpx
 
@@ -26,6 +29,10 @@ import httpx
 from mevzuat.icerik import html_coz
 # ListeKaynagi, listeyi okuma, tarih bulma, tarama işinin ortak hali. Biz sadece "sayfayı nasıl indireceğiz" kısmını yazıyoruz.
 from mevzuat.sources.liste import ListeKaynagi
+
+
+# Güvenli indirmede en fazla kaç yönlendirme takip edilir.
+YONLENDIRME_SINIRI = 3
 
 
 # Bir adresi indirip yazıya çeviren küçük yardımcı. Adın başındaki alt çizgi bunun dosyanın iç işi olduğunu, dışarıdan kullanılmaması gerektiğini söyler.
@@ -46,7 +53,15 @@ def _guvenli_indir(client: httpx.Client, url: str, semalar: tuple[str, ...]) -> 
     )
 
     # guvenli_url adresi kontrol eder (iç ağ yok, standart port...), sorun yoksa indiriyoruz.
-    return _indir(client, guvenli_url(url, semalar=semalar))
+    url = guvenli_url(url, semalar=semalar)
+    # Yönlendirme en fazla 3 kez takip edilir, her yeni adres aynı kontrolden geçer (ör. TCMB http'den https'e yönlendiriyor).
+    for _ in range(YONLENDIRME_SINIRI):
+        response = client.get(url, follow_redirects=False)
+        if not response.is_redirect:
+            response.raise_for_status()
+            return html_coz(response.content, response.charset_encoding)
+        url = guvenli_url(urljoin(url, response.headers["location"]), semalar=semalar)
+    raise ValueError(f"Çok fazla yönlendirme: {url}")
 
 
 # Düz HTML kaynağı. Parantezdeki ListeKaynagi sayesinde ortak liste kaynağının bütün özelliklerini miras alıyor.

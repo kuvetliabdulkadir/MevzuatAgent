@@ -46,11 +46,11 @@ from filelock import FileLock, Timeout
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mevzuat import gunluk, pipeline, rapor, saklama, surum, tanimlar, zamanlama
+from mevzuat import gunluk, pipeline, rapor, surum, tanimlar, zamanlama
 from mevzuat.db import IzlenenMevzuat, Kayit, MetinSurumu, make_engine, migrate
 from mevzuat.filtre import is_kollari
 from mevzuat.http import make_client
-from mevzuat.mail import DosyaGonderici, Mail, gonderici_ayardan, panel_adresi_ayardan
+from mevzuat.mail import DosyaGonderici, Mail
 from mevzuat.sources import resmi_gazete
 from mevzuat.web import guvenlik
 from mevzuat.zamanlama import (  # noqa: F401 (eski içe aktarımlar, testler)
@@ -99,9 +99,23 @@ def calistir_komutu(args: argparse.Namespace) -> None:
             print("HATALAR:\n" + calisma.hata)
 
 
-# .env'de virgülle ayrılmış adresleri listeye çevirir.
-def _adresler(degisken: str) -> list[str]:
-    return [a.strip() for a in os.environ.get(degisken, "").split(",") if a.strip()]
+# Panelden değişen ayarlar (mail, panel adresi, süreler), panelde boş olan .env'den. Veritabanına ulaşılamazsa sadece .env.
+def _ayarlar() -> dict:
+    from mevzuat import panel_ayarlari
+
+    try:
+        with Session(make_engine()) as session:
+            return panel_ayarlari.etkin(session)
+    except Exception as e:
+        logging.getLogger(__name__).warning("Panel ayarları okunamadı, .env kullanılıyor: %r", e)
+        return {alan.ad: panel_ayarlari.env_degeri(alan) for alan in panel_ayarlari.ALANLAR}
+
+
+# Ayarlardan mail göndericisi.
+def _gonderici(ayarlar: dict):
+    from mevzuat import panel_ayarlari
+
+    return panel_ayarlari.gonderici(ayarlar)
 
 
 # "gunluk" komutu, zamanlayıcının her gün çalıştırdığı asıl iş.
@@ -116,15 +130,16 @@ def gunluk_komutu(args: argparse.Namespace) -> None:
         print("Başka bir çalışma sürüyor, bu çalışma atlandı.")
         return
     try:
-        # Ayarları .env'den topla.
+        # Ayarlar panelden (panelde boş olanlar .env'den).
         izlenenler = _izlenenler()
+        a = _ayarlar()
         ayarlar = gunluk.Ayarlar(
-            admin_alicilari=_adresler("MEVZUAT_ADMIN_ALICILARI"),
-            ek_ekle=os.environ.get("MEVZUAT_EK_EKLE", "1") != "0",
-            nabiz_gunu=int(os.environ.get("MEVZUAT_NABIZ_GUNU", "0")),
-            panel_adresi=panel_adresi_ayardan(),
-            pasif_silme_gun=guvenlik.pasif_silme_gunu(),
-            saklama_gun=saklama.saklama_gunu(),
+            admin_alicilari=a["admin_alicilari"] or [],
+            ek_ekle=a["ek_ekle"],
+            nabiz_gunu=a["nabiz_gunu"],
+            panel_adresi=a["panel_adresi"],
+            pasif_silme_gun=a["pasif_silme_gun"],
+            saklama_gun=a["saklama_gun"],
         )
         # Panelden "Şimdi tara" ile başlatıldıysa zamanlayıcı istek numarasını bu değişkende verir.
         istek = os.environ.get(zamanlama.ISTEK_DEGISKENI)  # zamanlayıcı panelden istenen tarama için verir
@@ -132,7 +147,7 @@ def gunluk_komutu(args: argparse.Namespace) -> None:
         kaynaklar, konular, izlenenler = _tanimlar(engine, izlenenler)
         # Günlük işi çalıştır.
         with Session(engine) as session, make_client() as client:
-            sonuc = gunluk.calistir(session, client, kaynaklar, konular, gonderici_ayardan(), ayarlar,
+            sonuc = gunluk.calistir(session, client, kaynaklar, konular, _gonderici(a), ayarlar,
                                     izlenenler=izlenenler, istek_id=int(istek) if istek else None)
             # Oturum açıkken yazdırılmalı, commit'ten sonra nesneler DB'den yeniden okunur.
             rapor_bilgisi = f"#{sonuc.rapor.id} onaya sunuldu" if sonuc.rapor else "onaya sunulacak ilgili kayıt yok"
@@ -172,7 +187,7 @@ def onizle_komutu(args: argparse.Namespace) -> None:
     Gönderim yalnızca onay panelinden yapılır (onayı atlayan bir komut bilerek yok)."""
     engine = make_engine()
     migrate(engine)
-    ek_ekle = os.environ.get("MEVZUAT_EK_EKLE", "1") != "0"
+    ek_ekle = _ayarlar()["ek_ekle"]
     with Session(engine) as session, make_client() as client:
         kayitlar = rapor.bekleyen_kayitlar(session)
         if not kayitlar:
@@ -210,6 +225,52 @@ def kullanici_ekle_komutu(args: argparse.Namespace) -> None:
         print(f"Eklendi: {k.eposta} ({k.rol})")
 
 
+# "api-anahtari-uret" komutu, panel kullanılmayan kurulumda API anahtarını sunucudan üretir. Anahtar sadece burada bir kez basılır.
+def api_anahtari_uret_komutu(args: argparse.Namespace) -> None:
+    engine = make_engine()
+    migrate(engine)
+    with Session(engine) as session:
+        try:
+            kayit, anahtar = guvenlik.api_anahtari_uret(session, args.ad, args.rol, args.gun, None)
+        except ValueError as e:
+            raise SystemExit(str(e)) from e
+        session.commit()
+        sure = f"{args.gun} gün" if args.gun else "süresiz"
+        print(f"Anahtar #{kayit.id} '{kayit.ad}' ({args.rol}, {sure}). Bir daha gösterilmeyecek, şimdi kopyalayın:")
+        print(anahtar)
+
+
+# "api-anahtari-listele" komutu, anahtarları listeler (anahtarların kendisi değil, ilk harfleri).
+def api_anahtari_listele_komutu(args: argparse.Namespace) -> None:
+    from mevzuat.db import ApiAnahtari, Kullanici
+
+    engine = make_engine()
+    migrate(engine)
+    with Session(engine) as session:
+        simdi = datetime.now()
+        for k in session.scalars(select(ApiAnahtari).order_by(ApiAnahtari.id)):
+            hesap = session.get(Kullanici, k.kullanici_id)
+            durum = "iptal" if k.iptal else "süresi doldu" if k.son_kullanma and k.son_kullanma <= simdi else "aktif"
+            son = f"{k.son_kullanma:%d.%m.%Y}" if k.son_kullanma else "süresiz"
+            kullanim = f"{k.son_kullanim:%d.%m.%Y %H:%M}" if k.son_kullanim else "hiç kullanılmadı"
+            print(f"#{k.id}  {k.on_ek}…  {k.ad}  rol={hesap.rol if hesap else '-'}  {durum}  geçerlilik={son}  son kullanım={kullanim}")
+
+
+# "api-anahtari-iptal" komutu, anahtarı iptal eder, anahtar hemen çalışmaz olur.
+def api_anahtari_iptal_komutu(args: argparse.Namespace) -> None:
+    from mevzuat.db import ApiAnahtari
+
+    engine = make_engine()
+    migrate(engine)
+    with Session(engine) as session:
+        kayit = session.get(ApiAnahtari, args.id)
+        if kayit is None:
+            raise SystemExit(f"#{args.id} numaralı anahtar yok.")
+        guvenlik.api_anahtari_iptal(session, kayit, None)
+        session.commit()
+        print(f"Anahtar #{kayit.id} '{kayit.ad}' iptal edildi.")
+
+
 # "kullanici-pasif" komutu, kullanıcıyı pasifleştirir.
 def kullanici_pasif_komutu(args: argparse.Namespace) -> None:
     engine = make_engine()
@@ -241,15 +302,16 @@ def mfa_sifirla_komutu(args: argparse.Namespace) -> None:
 
 # "mail-dene" komutu, mail ayarları çalışıyor mu diye tek adrese deneme maili atar.
 def mail_dene_komutu(args: argparse.Namespace) -> None:
-    """Kurulumda SMTP ayarını denemek için tek bir adrese deneme maili atar, veritabanına dokunmaz."""
-    gonderici = gonderici_ayardan()
+    """Mail ayarını (panelden, panelde boşsa .env'den) denemek için tek bir adrese deneme maili atar, veritabanına yazmaz."""
+    a = _ayarlar()
+    gonderici = _gonderici(a)
     # Mail sunucusu ayarlı değilse uyar.
     if isinstance(gonderici, DosyaGonderici):
-        print("MEVZUAT_SMTP_HOST boş: mail gönderilmeyecek, giden_mailler/ klasörüne yazılacak.")
+        print("SMTP sunucusu boş: mail gönderilmeyecek, giden_mailler/ klasörüne yazılacak.")
     # Panel adresi yoksa uyar (onay mailinde düğme olmaz).
-    if not panel_adresi_ayardan():
-        print("UYARI: MEVZUAT_PANEL_ADRESI boş. Onay maillerinde \"Onay paneline git\" düğmesi olmaz, "
-              "davet/parola linkleri gönderilemez. .env'ye panelin adresini yazın (ör. https://mevzuat.firma.com.tr).")
+    if not a["panel_adresi"]:
+        print("UYARI: Panel adresi boş. Onay maillerinde \"Onay paneline git\" düğmesi olmaz, "
+              "davet/parola linkleri gönderilemez. Panelde Ayarlar sayfasından ya da .env'den girin.")
     simdi = datetime.now().strftime("%d.%m.%Y %H:%M")
     mail = Mail(
         konu=f"Mevzuat Takip — deneme maili ({simdi})",
@@ -296,7 +358,8 @@ def gonderim_durum_komutu(args: argparse.Namespace) -> None:
             guvenlik.denetle(session, "elle_tekrar_gonderim", rapor_id=r.id, gonderim_id=g.id)
             session.commit()
             with make_client() as client:
-                rapor.dagit(session, client, gonderici_ayardan(), r, os.environ.get("MEVZUAT_EK_EKLE", "1") != "0")
+                a = _ayarlar()
+                rapor.dagit(session, client, _gonderici(a), r, a["ek_ekle"])
             session.refresh(g)
             print(f"Gönderim #{g.id}: {g.durum}{' — ' + g.hata if g.hata else ''}. Rapor #{r.id}: {r.durum}")
 
@@ -483,6 +546,16 @@ def main() -> None:
     ke.add_argument("--ad", required=True)
     ke.add_argument("--rol", required=True, choices=guvenlik.ROLLER)
     ke.set_defaults(func=kullanici_ekle_komutu)
+
+    au = alt.add_parser("api-anahtari-uret", help="API anahtarı üret (panel kullanılmıyorsa); anahtar bir kez basılır")
+    au.add_argument("--ad", required=True, help="Hangi sistem kullanacak, ör. 'Portal entegrasyonu'")
+    au.add_argument("--rol", required=True, choices=guvenlik.API_ANAHTARI_ROLLERI)
+    au.add_argument("--gun", type=int, help="Geçerlilik (gün). Yazılmazsa süresiz")
+    au.set_defaults(func=api_anahtari_uret_komutu)
+    alt.add_parser("api-anahtari-listele", help="API anahtarlarını listele").set_defaults(func=api_anahtari_listele_komutu)
+    ai = alt.add_parser("api-anahtari-iptal", help="API anahtarını iptal et")
+    ai.add_argument("--id", type=int, required=True, help="Anahtar no (listede #)")
+    ai.set_defaults(func=api_anahtari_iptal_komutu)
 
     kp = alt.add_parser("kullanici-pasif", help="Kullanıcıyı pasifleştir (giriş yapamaz)")
     kp.add_argument("--eposta", required=True)

@@ -1,0 +1,13 @@
+# Mevzuat Takip — gecelik PostgreSQL yedeği (deploy/yedek.sh). Yedekler /var/backups/mevzuat altında, 30 gün saklanır.
+# Yedeği sunucunun DIŞINA da kopyalayın, disk arızasında aynı diskteki yedek de gider.
+
+[Unit]
+Description=Mevzuat Takip veritabanı yedeği
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+Environment=TZ=Europe/Istanbul
+ExecStart=/bin/sh /opt/mevzuat/mevzuat-takip/deploy/yedek.sh

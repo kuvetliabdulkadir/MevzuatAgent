@@ -34,7 +34,7 @@ from argon2.exceptions import InvalidHashError, VerificationError
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
-from mevzuat.db import Denetim, Kullanici, ParolaLinki
+from mevzuat.db import ApiAnahtari, Denetim, Kullanici, ParolaLinki
 from mevzuat.mail import Mail
 
 MFA_UYGULAMA_ADI = "Mevzuat Takip"  # doğrulayıcı uygulamada görünen ad
@@ -44,8 +44,12 @@ MIN_PAROLA = 12
 # 5 hatalı denemede 15 dakika kilit.
 MAX_DENEME = 5
 KILIT_SURESI = timedelta(minutes=15)
-ROLLER = ("admin", "onaylayici")
-ROL_ADLARI = {"admin": "Yönetici", "onaylayici": "Onaylayıcı"}
+ROLLER = ("admin", "onaylayici", "api")
+ROL_ADLARI = {"admin": "Yönetici", "onaylayici": "Onaylayıcı", "api": "API kullanıcısı", "tam": "Tam yetki"}
+# API anahtarının rolü olabilecekler. "tam" her şeyi yapar (test, entegrasyon), sadece anahtarlara verilir.
+# "api" rolü sadece dokümanı görür, anahtara verilmez.
+API_ANAHTARI_ROLLERI = ("tam", "admin", "onaylayici")
+API_ANAHTARI_ON_EKI = "mvz_"
 # Davet linki 3 gün, sıfırlama linki 1 saat geçerli.
 # Bu kadar gün pasif kalan hesap silinir (MEVZUAT_PASIF_SILME_GUN, 0 ise hiç silinmez).
 PASIF_SILME_GUN = 30
@@ -102,8 +106,8 @@ def giris_dene(
     simdi = datetime.now()
     kullanici = kullanici_bul(session, eposta)
 
-    # Kullanıcı yok ya da pasif, yine de sahte doğrulama yap (süre aynı olsun), sonra reddet.
-    if kullanici is None or not kullanici.aktif:
+    # Kullanıcı yok, pasif ya da API hesabı (parolayla girilmez), yine de sahte doğrulama yap (süre aynı olsun), sonra reddet.
+    if kullanici is None or not kullanici.aktif or kullanici.api_hesabi:
         _dogrula(_SAHTE_HASH, parola)  # süre eşitleme
         denetle(session, "giris_basarisiz", ip=ip, eposta=eposta[:254], sebep="yok_veya_pasif")
         session.commit()
@@ -250,6 +254,73 @@ def kullanici_ekle(session: Session, eposta: str, ad: str, rol: str, parola: str
     return kullanici
 
 
+# --- API anahtarları -----------------------------------------------------------------------------------------
+
+# Yeni anahtar üretir. Arkasında o rolde bir API hesabı açılır. Anahtarın kendisi sadece burada döner, saklanmaz.
+def api_anahtari_uret(session: Session, ad: str, rol: str, gun: int | None, olusturan: Kullanici | None,
+                      ip: str | None = None) -> tuple[ApiAnahtari, str]:
+    """olusturan None ise anahtar sunucuda komut satırından üretilmiştir (panel kullanılmayan kurulum)."""
+    ad = " ".join(ad.split())
+    if not ad or len(ad) > 100:
+        raise ValueError("Anahtara 1-100 karakterlik bir ad verin (ör. Muhasebe entegrasyonu).")
+    if rol not in API_ANAHTARI_ROLLERI:
+        raise ValueError(f"Anahtarın rolü {API_ANAHTARI_ROLLERI} içinden olmalı.")
+    if gun is not None and not 1 <= gun <= 3650:
+        raise ValueError("Süre 1 ile 3650 gün arasında olmalı ya da süresiz seçilmeli.")
+    simdi = datetime.now()
+    anahtar = API_ANAHTARI_ON_EKI + secrets.token_urlsafe(32)
+    hesap = Kullanici(eposta=f"api-{secrets.token_hex(8)}@api.anahtari", ad=f"API: {ad}", rol=rol,
+                      parola_hash=parola_hashle(secrets.token_urlsafe(32)), aktif=True, api_hesabi=True,
+                      basarisiz_giris=0, olusturuldu=simdi)
+    session.add(hesap)
+    session.flush()
+    olusturan_id = olusturan.id if olusturan else None
+    kayit = ApiAnahtari(ad=ad, kullanici_id=hesap.id, on_ek=anahtar[:10], ozet=_ozet(anahtar), olusturan_id=olusturan_id,
+                        olusturuldu=simdi, son_kullanma=simdi + timedelta(days=gun) if gun else None)
+    session.add(kayit)
+    session.flush()
+    denetle(session, "api_anahtari_uretildi", olusturan_id, ip, anahtar_id=kayit.id, ad=ad, rol=rol, gun=gun)
+    return kayit, anahtar
+
+
+# Gelen anahtarın hesabı. Anahtar yok, iptal edilmiş, süresi dolmuş ya da hesap pasifse None.
+def api_anahtari_hesabi(session: Session, anahtar: str) -> tuple[ApiAnahtari, Kullanici] | None:
+    if not anahtar.startswith(API_ANAHTARI_ON_EKI) or len(anahtar) > 200:
+        return None
+    kayit = session.scalar(select(ApiAnahtari).where(ApiAnahtari.ozet == _ozet(anahtar)))
+    simdi = datetime.now()
+    if kayit is None or kayit.iptal is not None or (kayit.son_kullanma and kayit.son_kullanma <= simdi):
+        return None
+    hesap = session.get(Kullanici, kayit.kullanici_id)
+    if hesap is None or not hesap.aktif:
+        return None
+    return kayit, hesap
+
+
+# Geçersiz anahtarın neden geçersiz olduğu (denetim kaydı için): yok, iptal, suresi_doldu, hesap_pasif.
+def api_anahtari_durumu(session: Session, anahtar: str) -> str:
+    kayit = session.scalar(select(ApiAnahtari).where(ApiAnahtari.ozet == _ozet(anahtar)))
+    if kayit is None:
+        return "yok"
+    if kayit.iptal is not None:
+        return "iptal"
+    if kayit.son_kullanma and kayit.son_kullanma <= datetime.now():
+        return "suresi_doldu"
+    return "hesap_pasif"
+
+
+# Anahtarı iptal eder, arkasındaki hesap pasifleşir (belli gün sonra kişisel bilgi silme işi onu da temizler).
+def api_anahtari_iptal(session: Session, kayit: ApiAnahtari, yapan: Kullanici | None, ip: str | None = None) -> None:
+    if kayit.iptal is not None:
+        return
+    simdi = datetime.now()
+    kayit.iptal = simdi
+    hesap = session.get(Kullanici, kayit.kullanici_id)
+    if hesap is not None:
+        hesap.aktif, hesap.pasif_tarihi = False, simdi
+    denetle(session, "api_anahtari_iptal", yapan.id if yapan else None, ip, anahtar_id=kayit.id, ad=kayit.ad)
+
+
 # --- kullanıcı yönetimi (panelden, admin) ---------------------------------------------------------------
 
 # Linkin SHA-256 özeti (veritabanında linkin kendisi değil bu saklanır).
@@ -331,7 +402,7 @@ def aktiflik_degistir(session: Session, hedef: Kullanici, aktif: bool, yapan: Ku
             raise ValueError("Kendi hesabınızı pasifleştiremezsiniz.")
         # Son aktif admin pasifleştirilemez (yoksa kimse kullanıcı yönetemez).
         if hedef.rol == "admin" and session.scalar(select(func.count()).select_from(Kullanici).where(
-                Kullanici.rol == "admin", Kullanici.aktif)) <= 1:
+                Kullanici.rol == "admin", Kullanici.aktif, Kullanici.api_hesabi.is_(False))) <= 1:
             raise ValueError("Son aktif yönetici pasifleştirilemez.")
         # Pasifleşen kişinin açık linkleri geçersiz olsun.
         _linkleri_iptal_et(session, hedef.id, datetime.now())

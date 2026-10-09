@@ -61,7 +61,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           }`}
         >
           {admin ? <Shield className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
-          {admin ? 'Yönetici' : 'Onaylayıcı'}
+          {admin ? 'Yönetici' : kullanici.api_kullanicisi ? 'API kullanıcısı' : 'Onaylayıcı'}
           {!admin && bekleyenSayisi > 0 && (
             <span className="ml-1 px-1.5 bg-amber-600 text-white text-[10px] rounded-full">{bekleyenSayisi}</span>
           )}

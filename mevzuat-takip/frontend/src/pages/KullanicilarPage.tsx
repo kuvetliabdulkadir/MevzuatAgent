@@ -1,7 +1,7 @@
 // "Kullanıcılar" sayfası (sadece admin), kullanıcı ekleme, parola linki gönderme, pasifleştirme.
 import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { KeyRound, Plus, Shield, UserCheck, UserMinus, UserPlus } from 'lucide-react';
+import { BookOpen, KeyRound, Plus, Shield, UserCheck, UserMinus, UserPlus } from 'lucide-react';
 import { api } from '../api';
 import { KullaniciIslemCevabi, KullaniciListesi, Mesaj, Rol, YonetilenKullanici } from '../types/api';
 import { MesajKutusu } from '../bicim';
@@ -9,7 +9,7 @@ import { tarihSaat } from '../tarih';
 import { OnayPenceresi, OnaySorusu } from '../components/OnayPenceresi';
 
 // Rol adlarının ekranda görünen karşılıkları.
-const ROL_ADI: Record<Rol, string> = { admin: 'Yönetici', onaylayici: 'Onaylayıcı' };
+const ROL_ADI: Record<Rol, string> = { admin: 'Yönetici', onaylayici: 'Onaylayıcı', api: 'API kullanıcısı' };
 
 // Sadece admin görür. Parolayı admin bilmez, kişiye maille link gider, parolasını kendisi belirler.
 // Kullanıcı önce pasifleştirilir, belli gün pasif kalınca hesabı silinir. Onay geçmişinde "Silinmiş kullanıcı" olarak görünür.
@@ -127,7 +127,9 @@ export const KullanicilarPage: React.FC<{ benimId: number }> = ({ benimId }) => 
                   </td>
                   <td className="px-5 py-3">
                     <span className="inline-flex items-center gap-1 text-stone-700">
-                      {k.rol === 'admin' ? <Shield className="w-3.5 h-3.5 text-petrol" /> : <UserCheck className="w-3.5 h-3.5 text-amber-700" />}
+                      {k.rol === 'admin' ? <Shield className="w-3.5 h-3.5 text-petrol" />
+                        : k.rol === 'api' ? <BookOpen className="w-3.5 h-3.5 text-sky-700" />
+                          : <UserCheck className="w-3.5 h-3.5 text-amber-700" />}
                       {ROL_ADI[k.rol]}
                     </span>
                   </td>
@@ -235,14 +237,16 @@ const YeniKullaniciFormu: React.FC<{ onKapat: () => void; onEklendi: (c: Kullani
           {/* Rol seçimi ve her rolün açıklaması. */}
           <fieldset className="space-y-1.5">
             <legend className="font-semibold text-stone-700">Rol</legend>
-            {(['onaylayici', 'admin'] as Rol[]).map((r) => (
+            {(['onaylayici', 'admin', 'api'] as Rol[]).map((r) => (
               <label key={r} className="flex items-start gap-2 p-2 rounded-sm bg-paper-100 hover:bg-paper-200 cursor-pointer">
                 <input type="radio" name="rol" checked={rol === r} onChange={() => setRol(r)} className="accent-petrol mt-0.5" />
                 <span>
                   <span className="font-medium text-stone-800">{ROL_ADI[r]}</span>
                   <span className="block text-stone-500">{r === 'onaylayici'
                     ? 'Raporları onaylar/reddeder; kaynak, konu, grup ve tarama ayarlarını yönetir.'
-                    : 'Kurtarma: kullanıcılar, parola linkleri, denetim kaydı, geri alma. Rapor onaylayamaz.'}</span>
+                    : r === 'admin'
+                      ? 'Kurtarma: kullanıcılar, parola linkleri, denetim kaydı, geri alma. Rapor onaylayamaz.'
+                      : 'Dış geliştirici: sadece API dokümanını görür. İstek atmak için ayrıca API anahtarı gerekir.'}</span>
                 </span>
               </label>
             ))}

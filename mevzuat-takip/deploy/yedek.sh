@@ -1,6 +1,6 @@
 #!/bin/sh
-# Mevzuat Takip — PostgreSQL yedeği. Docker'daki yedek container'ı (yedek-docker.sh) her gece çalıştırır.
-# Geri yükleme: deploy/DOCKER.md, "Yedek ve geri dönüş" bölümü.
+# Mevzuat Takip — PostgreSQL yedeği. Docker'da yedek container'ı, Docker'sız kurulumda mevzuat-yedek.timer her gece çalıştırır.
+# Geri yükleme: deploy/DOCKER.md (Docker) ya da deploy/KURULUM-DOCKERSIZ.md (Docker'sız), "Yedek" bölümü.
 set -eu
 
 HEDEF=${MEVZUAT_YEDEK_KLASORU:-/var/backups/mevzuat}

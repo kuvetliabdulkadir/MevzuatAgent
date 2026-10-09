@@ -1,0 +1,11 @@
+# Her gece 02:30 (tarama saatleri varsayılan 06:30 ve 18:00, çakışmaz).
+
+[Unit]
+Description=Mevzuat Takip gecelik yedek zamanlayıcı
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 Europe/Istanbul
+Persistent=true
+
+[Install]
+WantedBy=timers.target

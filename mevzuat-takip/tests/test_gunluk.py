@@ -266,7 +266,7 @@ def test_gonderim_durum_komutu_sadece_o_maili_cozer(tmp_path, monkeypatch):
         rapor_id, takili_id = r.id, takili.id
 
     posta = Posta()
-    monkeypatch.setattr(cli, "gonderici_ayardan", lambda: posta)
+    monkeypatch.setattr(cli, "_gonderici", lambda ayarlar: posta)
     cli.gonderim_durum_komutu(argparse.Namespace(id=takili_id, gonderildi=False, tekrar_gonder=True))
     assert [m.alicilar for m in posta.giden] == [["b@firma.com"]]  # a'ya tekrar gitmedi
     with Session(engine) as s:

@@ -74,7 +74,9 @@ class Kullanici(Base):
     ad: Mapped[str] = mapped_column(String(200))
     # Parolanın kendisi değil, geri çevrilemeyen özeti saklanır.
     parola_hash: Mapped[str] = mapped_column(String(200))  # Argon2
-    rol: Mapped[str] = mapped_column(String(20))  # "admin" | "onaylayici"
+    rol: Mapped[str] = mapped_column(String(20))  # "admin" | "onaylayici" | "api" (sadece API dokümanını görür)
+    # API anahtarının arkasındaki hesap. Parolayla giriş yapamaz, kullanıcı listesinde ve onay maillerinde yer almaz.
+    api_hesabi: Mapped[bool] = mapped_column(default=False, server_default=false())
     # Pasif kullanıcı giriş yapamaz. Belli gün pasif kalınca kişisel bilgileri silinir (guvenlik.pasifleri_sil).
     aktif: Mapped[bool] = mapped_column(default=True)
     pasif_tarihi: Mapped[datetime | None]  # pasifleştirildiği an, yeniden açılınca boşalır
@@ -354,6 +356,43 @@ class TaramaIstegi(Base):
     __table_args__ = (Index("uq_tarama_istekleri_tek_aktif", text("(1)"), unique=True,
                             postgresql_where=text("durum IN ('BEKLIYOR', 'CALISIYOR')"),
                             sqlite_where=text("durum IN ('BEKLIYOR', 'CALISIYOR')")),)
+
+
+# Dışarıdan API erişimi için anahtarlar. Anahtarın kendisi saklanmaz, SHA-256 özeti saklanır, sadece üretilirken bir kez gösterilir.
+class ApiAnahtari(Base):
+    """Her anahtarın arkasında bir API hesabı (Kullanici, api_hesabi=True) vardır, anahtar o hesabın rolüyle çalışır.
+    Böylece yetki kontrolleri ve denetim kaydı panel kullanıcılarıyla aynıdır. İptal edilen anahtarın hesabı pasifleşir."""
+
+    __tablename__ = "api_anahtarlari"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ad: Mapped[str] = mapped_column(String(100))
+    kullanici_id: Mapped[int] = mapped_column(ForeignKey("kullanicilar.id"))
+    on_ek: Mapped[str] = mapped_column(String(12))  # listede tanımak için anahtarın ilk harfleri
+    ozet: Mapped[str] = mapped_column(String(64), unique=True)
+    olusturan_id: Mapped[int | None] = mapped_column(ForeignKey("kullanicilar.id"))
+    olusturuldu: Mapped[datetime]
+    son_kullanma: Mapped[datetime | None]  # boşsa süresiz
+    son_kullanim: Mapped[datetime | None]
+    iptal: Mapped[datetime | None]
+
+
+# Panelin sol menüsü. Arayüz menüyü buradan çeker, kullanıcının yetkisine uyan aktif öğeleri gösterir.
+class MenuOgesi(Base):
+    """Sol menüdeki bir öğe. `anahtar` arayüzdeki sayfanın adıdır (raporlar, kaynaklar ...), `adres` doluysa öğe sayfa
+    değil yeni sekmede açılan bir bağlantıdır (API dokümanı gibi). `yetki` öğeyi kimin göreceğini söyler,
+    herkes, grup, ayar ya da kurtarma. Yetkinin rollere karşılığı web/__init__.py içinde, sayfaların kendi kontrolü de ayrıca durur."""
+
+    __tablename__ = "menu_ogeleri"
+
+    anahtar: Mapped[str] = mapped_column(String(50), primary_key=True)
+    etiket: Mapped[str] = mapped_column(String(100))
+    aciklama: Mapped[str] = mapped_column(String(200), default="")
+    ikon: Mapped[str] = mapped_column(String(50))  # lucide ikon adı, arayüz tanımıyorsa varsayılan ikon çıkar
+    yetki: Mapped[str] = mapped_column(String(20))
+    adres: Mapped[str | None] = mapped_column(String(200))
+    sira: Mapped[int] = mapped_column(default=0)
+    aktif: Mapped[bool] = mapped_column(default=True)
 
 
 # Veritabanı bağlantısını kurar (.env'deki adres, yoksa yerel SQLite dosyası).

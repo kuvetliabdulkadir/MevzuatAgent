@@ -174,7 +174,7 @@ def test_panel_adresi_yoksa_ve_mail_gitmezse(engine, posta):
     c = _istemci(engine, posta, panel_adresi=None)
     _giris(c, "admin@firma.com")
     cevap = _post(c, "/api/kullanicilar", {"eposta": "y@firma.com", "ad": "Y", "rol": "onaylayici"})
-    assert cevap.json()["mesaj"]["tur"] == "hata" and "MEVZUAT_PANEL_ADRESI" in cevap.json()["mesaj"]["mesaj"]
+    assert cevap.json()["mesaj"]["tur"] == "hata" and "Panel adresi tanımlı değil" in cevap.json()["mesaj"]["mesaj"]
     assert posta.giden == []
 
     c = _istemci(engine, posta)
