@@ -1,0 +1,14 @@
+# Mevzuat Takip — panelin önündeki HTTPS'li ters vekil (Caddy, nginx yerine). Kopyala: /etc/caddy/Caddyfile
+# Panel 127.0.0.1:8000'de dinler; dışarıya sadece Caddy açılır (443).
+# Bu dosyayı kullanınca .env'de MEVZUAT_HTTPS=1 yapın (çerez sadece HTTPS'te gider,
+# gerçek istemci IP'si denetim kaydına yazılır).
+
+mevzuat.firma.local {
+	# Şirket içi ad: Caddy kendi iç sertifika otoritesini kullanır. Tarayıcılar uyarı vermesin diye
+	# Caddy'nin kök sertifikası (/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt)
+	# şirket bilgisayarlarına güvenilir olarak eklenir ya da bilgi işlemin sertifikası kullanılır:
+	#   tls /etc/caddy/mevzuat.crt /etc/caddy/mevzuat.key
+	tls internal
+
+	reverse_proxy 127.0.0.1:8000
+}

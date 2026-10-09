@@ -67,7 +67,8 @@ def onaylayici_adresleri(session: Session) -> list[str]:
     # Önce onaylayıcılara bak, bulunursa onları ver. Bulunamazsa adminlere bak.
     for rol in ("onaylayici", "admin"):
         adresler = list(
-            session.scalars(select(Kullanici.eposta).where(Kullanici.rol == rol, Kullanici.aktif).order_by(Kullanici.id))
+            session.scalars(select(Kullanici.eposta).where(Kullanici.rol == rol, Kullanici.aktif, Kullanici.api_hesabi.is_(False))
+                            .order_by(Kullanici.id))
         )
         if adresler:
             return adresler

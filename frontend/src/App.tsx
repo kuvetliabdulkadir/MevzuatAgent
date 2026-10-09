@@ -17,6 +17,9 @@ import { KeywordsPage } from './pages/KeywordsPage';
 import { TaramaPage, ZamanlayiciUyarisi } from './pages/TaramaPage';
 import { KullanicilarPage } from './pages/KullanicilarPage';
 import { DenetimPage } from './pages/DenetimPage';
+import { AyarlarPage } from './pages/AyarlarPage';
+import { ApiAnahtarlariPage } from './pages/ApiAnahtarlariPage';
+import { ApiKarsilamaPage } from './pages/ApiKarsilamaPage';
 import { ParolaBelirlePage } from './pages/ParolaBelirlePage';
 
 // Davet ve sıfırlama mailindeki link parola anahtarını adreste taşır. Anahtar adresten hemen silinir, tarayıcı geçmişinde kalmasın.
@@ -82,7 +85,8 @@ function maildekiRapor(): number | null {
 // Giriş yapılmış kullanıcının paneli, üst çubuk, sol menü ve seçili sayfa.
 const Panel: React.FC<{ kullanici: Kullanici; mailKapali: boolean; onCikis: () => void }> = ({ kullanici, mailKapali, onCikis }) => {
   // Seçili menü sekmesi, telefonda menü açık mı, rapor listesi, açık rapor penceresi, ekrandaki mesaj.
-  const [activeTab, setActiveTab] = useState<ActiveTab>('raporlar');
+  // API kullanıcısı sadece dokümanı görür, onun sayfası karşılama.
+  const [activeTab, setActiveTab] = useState<ActiveTab>(kullanici.api_kullanicisi ? 'api' : 'raporlar');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [raporlar, setRaporlar] = useState<{ bekleyenler: RaporOzeti[]; gecmis: RaporOzeti[] }>({ bekleyenler: [], gecmis: [] });
   const [seciliRapor, setSeciliRapor] = useState<number | null>(maildekiRapor);
@@ -90,8 +94,9 @@ const Panel: React.FC<{ kullanici: Kullanici; mailKapali: boolean; onCikis: () =
 
   // Rapor listesini sunucudan çeker.
   const raporlariYukle = useCallback(() => {
+    if (kullanici.api_kullanicisi) return;
     api.get<typeof raporlar>('/raporlar').then(setRaporlar).catch((e) => setMesaj({ tur: 'hata', mesaj: e.message }));
-  }, []);
+  }, [kullanici.api_kullanicisi]);
   useEffect(raporlariYukle, [raporlariYukle]);
   // Rapor açıldıktan sonra rapor numarası adresten silinir, sayfa yenilenince ya da çıkıp girince rapor yeniden açılmasın.
   useEffect(() => {
@@ -102,12 +107,13 @@ const Panel: React.FC<{ kullanici: Kullanici; mailKapali: boolean; onCikis: () =
   // Zamanlayıcının durumunu dakikada bir sorar (çalışmıyorsa her sayfada uyarı çıkar).
   const [zamanlama, setZamanlama] = useState<ZamanlamaDurumu | null>(null);
   useEffect(() => {
+    if (kullanici.api_kullanicisi) return;
     const yukle = () => api.get<ZamanlamaDurumu>('/zamanlama').then(setZamanlama).catch(() => {});
     yukle();
     // 60 saniyede bir tekrar sor, sayfa kapanınca zamanlayıcıyı durdur.
     const t = window.setInterval(yukle, 60_000);
     return () => window.clearInterval(t);
-  }, []);
+  }, [kullanici.api_kullanicisi]);
 
   // Rapor penceresinde karar verilince, pencereyi kapat, mesajı göster, listeyi yenile.
   const kararVerildi = (m: Mesaj) => {
@@ -148,10 +154,10 @@ const Panel: React.FC<{ kullanici: Kullanici; mailKapali: boolean; onCikis: () =
           {/* Zamanlayıcı çalışmıyor uyarısı (Tarama sayfasında zaten var, orada tekrar gösterme). */}
           {zamanlama && !zamanlama.zamanlayici_calisiyor && activeTab !== 'tarama' && <ZamanlayiciUyarisi durum={zamanlama} />}
           {/* Mail sunucusu ayarsızsa kırmızı uyarı. */}
-          {mailKapali && (
+          {mailKapali && !kullanici.api_kullanicisi && (
             <MesajKutusu tur="hata">
-              Mail gönderimi kapalı: mail sunucusu (MEVZUAT_SMTP_HOST) ayarlı değil. Onay ve dağıtım mailleri kimseye
-              gitmiyor, sunucudaki giden_mailler/ klasörüne yazılıyor. Sunucu yöneticisine bildirin.
+              Mail gönderimi kapalı: mail sunucusu ayarlı değil. Onay ve dağıtım mailleri kimseye gitmiyor, sunucudaki
+              giden_mailler/ klasörüne yazılıyor. Yönetici Ayarlar sayfasından mail sunucusunu girebilir.
             </MesajKutusu>
           )}
           {/* Son işlemin mesajı. */}
@@ -167,6 +173,9 @@ const Panel: React.FC<{ kullanici: Kullanici; mailKapali: boolean; onCikis: () =
           {activeTab === 'tarama' && <TaramaPage ayarYonetebilir={kullanici.ayar_yonetebilir} />}
           {activeTab === 'kullanicilar' && kullanici.kurtarma_yapabilir && <KullanicilarPage benimId={kullanici.id} />}
           {activeTab === 'denetim' && kullanici.kurtarma_yapabilir && <DenetimPage />}
+          {activeTab === 'ayarlar' && kullanici.kurtarma_yapabilir && <AyarlarPage />}
+          {activeTab === 'api_anahtarlari' && kullanici.kurtarma_yapabilir && <ApiAnahtarlariPage />}
+          {activeTab === 'api' && <ApiKarsilamaPage />}
         </main>
       </div>
 

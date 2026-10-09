@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from mevzuat import rapor
-from mevzuat.db import AliciGrubu, Calisma, Denetim, Gonderim, Kayit, Kullanici, Rapor, init_db
+from mevzuat.db import AliciGrubu, Calisma, Denetim, Gonderim, Kayit, Kullanici, MenuOgesi, Rapor, init_db, migrate
 from mevzuat.mail import Mail
 from mevzuat.web import uygulama_olustur
 from mevzuat.web.guvenlik import MAX_DENEME, kullanici_ekle
@@ -425,3 +425,88 @@ def test_mail_kapaliyken_gonderildi_denmez(ortam, tmp_path):
     cevap = _post(client, f"/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [ilk]}).json()
     assert cevap["tur"] == "hata" and "GÖNDERİLMEDİ" in cevap["mesaj"]
     assert list(tmp_path.glob("*.eml"))
+
+
+# ---- menü ve API dokümanı --------------------------------------------------------------------------
+
+@pytest.fixture
+def migrasyonlu(tmp_path, arayuz):
+    """Gerçek migration'larla kurulmuş veritabanı, menü 0018'deki haliyle gelir."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'm.db'}")
+    migrate(engine)
+    with Session(engine) as s:
+        kullanici_ekle(s, "sorumlu@firma.com", "Ayşe Sorumlu", "onaylayici", PAROLA)
+        kullanici_ekle(s, "admin@firma.com", "Bilgi İşlem", "admin", PAROLA)
+    return TestClient(uygulama_olustur(engine, Posta(), IS_KOLLARI, ANAHTAR, ek_ekle=False, arayuz=arayuz)), engine
+
+
+def test_menu_veritabanindan_yetkiye_gore_gelir(migrasyonlu):
+    client, engine = migrasyonlu
+    assert client.get("/api/menu").status_code == 401
+    _giris(client)
+    onaylayici = [m["anahtar"] for m in client.get("/api/menu").json()]
+    assert onaylayici == ["raporlar", "gruplar", "kaynaklar", "konular", "tarama"]  # API dokümanı yok
+    _post(client, "/api/cikis", {})
+    _giris(client, eposta="admin@firma.com")
+    admin = client.get("/api/menu").json()
+    assert [m["anahtar"] for m in admin] == ["raporlar", "gruplar", "kaynaklar", "konular", "tarama", "kullanicilar",
+                                             "denetim", "ayarlar", "api_anahtarlari", "api_dokumani"]
+    assert admin[-1] == {"anahtar": "api_dokumani", "etiket": "API Dokümanı", "aciklama": "Swagger, uç noktalar",
+                         "ikon": "BookOpen", "adres": "/api/dokuman"}
+    # Veritabanında pasifleştirilen ya da sırası değişen öğe menüye yansır, bilinmeyen yetki kimseye görünmez.
+    with Session(engine) as s:
+        s.get(MenuOgesi, "tarama").aktif = False
+        s.get(MenuOgesi, "denetim").sira = -1
+        s.add(MenuOgesi(anahtar="gizli", etiket="Gizli", aciklama="", ikon="X", yetki="patron", sira=0, aktif=True))
+        s.commit()
+    anahtarlar = [m["anahtar"] for m in client.get("/api/menu").json()]
+    assert anahtarlar[0] == "denetim" and "tarama" not in anahtarlar and "gizli" not in anahtarlar
+
+
+def test_api_dokumani_giris_ister_ve_csp_ile_uyumlu(migrasyonlu):
+    client, _ = migrasyonlu
+    # Sayfa kabuğu herkese açık, içinde veri yok. Doküman (openapi.json) oturum ya da anahtar ister.
+    sayfa = client.get("/api/dokuman")
+    assert sayfa.status_code == 200 and "/swagger/swagger-ui-bundle.js" in sayfa.text and "/api/" not in sayfa.text.split("baslat.js")[1]
+    assert client.get("/api/dokuman/openapi.json").status_code == 401
+    assert client.get("/api/dokuman/indir").status_code == 401
+    _giris(client, eposta="admin@firma.com")
+    assert "script-src 'self'" in sayfa.headers["content-security-policy"]
+    assert "<script>" not in sayfa.text  # satır içi script yok, CSP engellemez
+    # Tek doküman: mevzuat arama (/api/v1) ve panelin bütün işlemleri birlikte, tek kimlik doğrulama biçimi (Bearer).
+    sema = client.get("/api/dokuman/openapi.json").json()
+    assert sema["info"]["title"] == "Mevzuat Takip API"
+    assert {"/api/v1/mevzuat", "/api/v1/mevzuat/{kayit_id}", "/api/v1/konular", "/api/v1/raporlar"} <= set(sema["paths"])
+    assert "/api/raporlar/{rapor_id}/ek-gonderim" in sema["paths"] and "/api/menu" in sema["paths"]
+    assert list(sema["components"]["securitySchemes"]) == ["HTTPBearer"]
+    # Panelin kendi girişi, anahtar yönetimi ve tekrar eden rapor okuma dokümanda yok, adresler yine çalışır.
+    gizli = ("/api/giris", "/api/oturum", "/api/parolam", "/api/api-anahtarlari", "/api/raporlar", "/api/raporlar/{rapor_id}")
+    assert not any(p in sema["paths"] for p in gizli)
+    assert sema["paths"]["/api/gruplar"]["get"]["responses"]["200"]["content"]["application/json"]["example"]["gruplar"]
+    assert [e["name"] for e in sema["tags"]][:2] == ["Mevzuat", "Kategoriler"]
+    # Her panel uç noktası belgeli: Türkçe başlık, yetki satırı, hata cevapları.
+    for yol, islemler in sema["paths"].items():
+        for yontem, islem in islemler.items():
+            assert yol.startswith("/api/v1/") or "**Yetki:**" in islem["description"], (yontem, yol)
+    karar = sema["paths"]["/api/raporlar/{rapor_id}/karar"]["post"]
+    assert karar["summary"] == "Raporu onayla ya da reddet" and {"400", "401", "403", "404", "409"} <= set(karar["responses"])
+    assert sema["components"]["schemas"]["KararIstegi"]["examples"][0]["karar"] == "onayla"
+    # Arayüz dosyaları, sağlık ve doküman adresleri dokümanda yok, her uç nokta bir grupta.
+    assert not any(p in sema["paths"] for p in ("/{yol}", "/saglik", "/api/dokuman", "/api/{yol}"))
+    gruplar = {etiket for yol in sema["paths"].values() for islem in yol.values() for etiket in islem["tags"]}
+    assert "Diğer" not in gruplar and {"Raporlar ve onay", "Kaynaklar", "Menü"} <= gruplar
+
+
+def test_dokuman_indirilir_html_internetsiz_json_sunucu_adresli(migrasyonlu, arayuz):
+    client, _ = migrasyonlu
+    (arayuz / "swagger").mkdir()
+    (arayuz / "swagger" / "swagger-ui-bundle.js").write_text("var SwaggerUIBundle=function(){};", encoding="utf-8")
+    (arayuz / "swagger" / "swagger-ui.css").write_text("body{}", encoding="utf-8")
+    _giris(client, eposta="admin@firma.com")
+    html_ = client.get("/api/dokuman/indir?bicim=html")
+    assert html_.status_code == 200 and "attachment" in html_.headers["content-disposition"]
+    assert "var SwaggerUIBundle" in html_.text and "/api/v1/mevzuat" in html_.text
+    assert "<script src=" not in html_.text and "<link" not in html_.text  # dışarıdan dosya çekmez
+    json_ = client.get("/api/dokuman/indir?bicim=json")
+    assert json_.status_code == 200 and json_.json()["info"]["title"] == "Mevzuat Takip API"
+    assert client.get("/api/dokuman/indir?bicim=pdf").status_code == 422

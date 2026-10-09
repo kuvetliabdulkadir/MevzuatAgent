@@ -20,7 +20,7 @@ def test_yanlis_sifre_anlasilir_mesaj(monkeypatch):
         def gonder(self, mail):
             raise smtplib.SMTPAuthenticationError(535, b"BadCredentials")
 
-    monkeypatch.setattr(cli, "gonderici_ayardan", lambda: Reddeden())
+    monkeypatch.setattr(cli, "_gonderici", lambda ayarlar: Reddeden())
     with pytest.raises(SystemExit, match="Uygulama şifreleri"):
         cli.mail_dene_komutu(argparse.Namespace(adres="deneme@firma.test"))
 
@@ -30,6 +30,6 @@ def test_baglanti_hatasi(monkeypatch):
         def gonder(self, mail):
             raise OSError("bağlantı reddedildi")
 
-    monkeypatch.setattr(cli, "gonderici_ayardan", lambda: Ulasilamayan())
+    monkeypatch.setattr(cli, "_gonderici", lambda ayarlar: Ulasilamayan())
     with pytest.raises(SystemExit, match="gönderilemedi"):
         cli.mail_dene_komutu(argparse.Namespace(adres="deneme@firma.test"))
