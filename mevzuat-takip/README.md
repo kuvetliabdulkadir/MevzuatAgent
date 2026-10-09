@@ -6,7 +6,7 @@ mail ile dağıtan sistem.
 
 Bir kuyumculuk firmasında staj projesi olarak geliştirildi (Ekim 2026). İş kolları: **Kuyum, Döviz/Altın, Oto kiralama** ve hepsini ilgilendiren **Ortak**.
 
-> **Durum:** Canlıda çalışıyor (Docker, Ubuntu 24.04, HTTPS). 362 test geçiyor.
+> **Durum:** Canlıda çalışıyor (Docker, Ubuntu 24.04, HTTPS). 431 test geçiyor.
 
 ---
 
@@ -17,6 +17,7 @@ Zamanlayıcı (varsayılan 06:30 + 18:00 Türkiye saati, panelden değişir) ya 
    │
    ▼
 Kaynaklar ── Resmî Gazete (günlük fihrist) · MASAK (WordPress API) · GİB (sitenin JSON API'si)
+   │         · Mevzuat Bilgi Sistemi (yeni eklenen mevzuat)
    │         panelden eklenenler (düz HTML / RSS, tip adresten otomatik bulunur)
    │         + mevzuat.gov.tr güncel metin takibi (21 mevzuat, madde bazında fark)
    ▼
@@ -73,7 +74,7 @@ yeniden başlatma gerekmez. Panelde girilen değer `.env`'in önüne geçer. Mai
 | Dil, paket yönetimi | Python 3.12, uv |
 | Çekme, ayrıştırma | httpx, selectolax (Playwright sadece isteğe bağlı yedek tip) |
 | PDF, OCR | pdfplumber, pypdfium2, Tesseract (Türkçe) |
-| Veritabanı | PostgreSQL 16 (sunucu), SQLite (geliştirme), SQLAlchemy 2, Alembic (15 migration) |
+| Veritabanı | PostgreSQL 16 (sunucu), SQLite (geliştirme), SQLAlchemy 2, Alembic (18 migration) |
 | Fark | difflib (madde bazında) |
 | Mail | smtplib, Jinja2 (HTML + düz metin) |
 | Backend | FastAPI (JSON API), imzalı HttpOnly çerez oturumu |
@@ -132,6 +133,7 @@ cd frontend && npm install && npm run dev  # arayüz geliştirme (5173, /api vek
 | `mail-dene` | SMTP ayarını dener |
 | `gonderim-durum --id N` | Durumu belirsiz kalan bir maili çözer |
 | `ayar-disa-aktar`, `ayar-ice-aktar` | Kaynak ve konu tanımlarını dosyaya yazar / dosyadan uygular |
+| `api-anahtari-uret`, `api-anahtari-listele`, `api-anahtari-iptal` | API anahtarı işlemleri (panel kullanılmıyorsa) |
 
 ## Klasörler
 
@@ -147,15 +149,16 @@ src/mevzuat/
   rapor.py, mail.py    rapor, onay akışı, dağıtım
   alicilar.py          alıcı grupları, kişi başı dağıtım planı
   kaynak_bulucu.py     adresten kaynak tipini ve seçicileri bulur
-  web/                 FastAPI panel API ve güvenlik
+  web/                 FastAPI panel API ve güvenlik, portal.py sürümlü API (/api/v1)
+  panel_ayarlari.py    panelden değişen ayarlar (.env'in önüne geçer)
   migrations/          Alembic şema geçişleri
 frontend/              React panel (dist derlenmiş hâli)
 config/                ilk kurulum tohumu: kaynaklar, konular, izlenen mevzuat
-deploy/                Docker kurulum rehberi, yedek betikleri
+deploy/                kurulum rehberleri (Docker ve Docker'sız), servis dosyaları, yedek betikleri, API test rehberi
 tests/                 testler ve gerçek sayfalardan alınmış örnekler
 ```
 
 ## Rakamlar
 
-4 kaynak (3 tarama + güncel metin) · 8 konu · 21 takip edilen mevzuat · 15 tablo · 15 migration · 362 test ·
+5 kaynak (4 tarama + güncel metin) · 8 konu · 21 takip edilen mevzuat · 17 tablo · 18 migration · 434 test ·
 90 günlük gerçek veride 716 Resmî Gazete başlığından 85'i ilgili · Resmî Gazete PDF'lerinin %82'si taranmış görüntü.
