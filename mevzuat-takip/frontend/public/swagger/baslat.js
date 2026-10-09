@@ -106,9 +106,6 @@ function kapaliDokuman() {
     .then((oturum) => {
       // Panel oturumu dokümanı görebiliyorsa (admin, API kullanıcısı) oturumla açılır. Göremiyorsa (onaylayıcı) anahtar istenir.
       if (oturum.kullanici && (oturum.kullanici.rol === 'admin' || oturum.kullanici.rol === 'api')) {
-        const bilgi = eleman('div', 'ag-bilgi');
-        bilgi.append(eleman('span', '', "Panel oturumuyla açıldı. Denemek için sağ üstteki Authorize'a API anahtarı girin."));
-        KUTU.replaceChildren(bilgi);
         swaggerAc((istek) => istek);
         return;
       }
@@ -122,9 +119,6 @@ function kapaliDokuman() {
 fetch(TANIM, { credentials: 'omit' })
   .then((cevap) => {
     if (!cevap.ok) return kapaliDokuman();
-    const bilgi = eleman('div', 'ag-bilgi');
-    bilgi.append(eleman('span', '', "İstek denemek için sağ üstteki Authorize'a API anahtarınızı girin (Authorization: Bearer mvz_...)."));
-    KUTU.replaceChildren(bilgi);
     swaggerAc((istek) => istek);
     return null;
   })
