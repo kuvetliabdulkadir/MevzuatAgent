@@ -1,4 +1,4 @@
-"""API dokümanı: genel açıklama, grupların sırası ve panel adreslerinin başlığı, açıklaması, yetkisi, hata cevapları.
+"""API dokümanı: grupların sırası ve panel adreslerinin başlığı, açıklaması, yetkisi, hata cevapları.
 
 Panelin kendi arayüzü bu adresleri kullanır. Portala açılanlar web/portal.py'de /api/v1 altına da eklenir, başlık ve
 açıklamaları buradan alır. Açıklamalar
@@ -6,66 +6,6 @@ koddan ayrı burada durur, uç nokta değişince buradaki satır da güncellenir
 """
 
 from fastapi.routing import APIRoute
-
-ACIKLAMA = """
-Mevzuat Takip sisteminin API'si. Mevzuat arama, rapor onayı ve gönderimi, tarama, kaynak, konu ve alıcı grubu
-yönetimi buradan yapılır. Şirket portalı bizim arayüz yerine bunu kullanabilir.
-
-## Sürümlü adresler
-
-Portalın kullanacağı adresler `/api/v1` ile başlar. Bu adreslerde alanların adı ve biçimi değişmez. Değişmesi
-gerekirse `/api/v2` açılır, v1 bir süre aynen çalışmaya devam eder. Cevaplara yeni alan eklenebilir, portal
-tanımadığı alanı görmezden gelmelidir.
-
-`/api/v1` ile başlamayan adresler (kullanıcılar, ayarlar, denetim kaydı, değişiklik geçmişi ve önceki hale döndürme,
-menü) panelin yönetim adresleridir. Sistem yöneticisi içindir, haber verilmeden değişebilir, portal kullanmamalıdır.
-
-## Kimlik doğrulama
-
-Her istekte sistem yöneticisinin verdiği API anahtarı gönderilir:
-
-```
-Authorization: Bearer mvz_xxxxxxxxxxxxxxxx
-```
-
-Bu sayfada sağ üstteki **Authorize** düğmesine anahtar girilince "Try it out" istekleri o anahtarla atılır,
-anahtarsız istek 401 alır. Anahtar, üretilirken seçilen rolün yetkisiyle çalışır:
-
-| Rol | Yapabildikleri |
-|---|---|
-| Tam yetki | Her şey (test ve entegrasyon için) |
-| Onaylayıcı | Rapor onayı/reddi ve gönderimi, kaynak, konu, alıcı grubu, tarama |
-| Yönetici | Kullanıcılar, ayarlar, denetim kaydı, kaynak, konu, alıcı grubu, tarama. Rapor onaylayamaz |
-
-## Örnek
-
-```
-curl -H "Authorization: Bearer mvz_..." "https://mevzuat.firma.com.tr/api/v1/mevzuat?q=altın&adet=10"
-```
-
-## Kurallar
-
-- Gövdeler JSON'dur. Tarihler `YYYY-AA-GG`, zamanlar `YYYY-AA-GGTSS:DD`, Türkiye saatiyle.
-- Mevzuat ve rapor listeleri sayfalıdır (`sayfa`, `adet` en fazla 100, cevapta `toplam`).
-- Düzenleme isteklerinde `surum` gönderilir (kaydın son okunduğu andaki sürüm). Kayıt bu arada değiştiyse `409` döner,
-  kayıt yeniden okunup tekrar denenir.
-- Rapor durumları: `ONAY_BEKLIYOR` → onay ile `ONAYLANDI` → mailler gidince `GONDERILDI`, ya da ret ile `REDDEDILDI`.
-- Rapor onayında kalem numaraları `GET /api/v1/raporlar/{rapor_id}` cevabındaki kalemlerin `id`'si, alıcı grubu
-  numaraları `GET /api/v1/gruplar` cevabındaki grupların `id`'sidir.
-
-## Hata cevapları
-
-Hata cevabı `{"detail": "açıklama"}` biçimindedir (422'de hatalı alanların listesi).
-
-| Kod | Anlamı |
-|---|---|
-| 400 | İstek iş kuralına uymuyor, `detail` sebebi Türkçe yazar |
-| 401 | API anahtarı yok, geçersiz, süresi dolmuş ya da iptal edilmiş |
-| 403 | Rolün bu işleme yetkisi yok |
-| 404 | Kayıt yok |
-| 409 | Kayıt bu arada değişti ya da işlem zaten yapıldı |
-| 422 | Gövde ya da parametre biçimi hatalı |
-"""
 
 # Dokümandaki grupların sırası ve açıklamaları.
 ETIKETLER = [
