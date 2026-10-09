@@ -159,6 +159,42 @@
   }
 }
 
+/* Telefonda tablo yana kaymasın diye her satır alt alta bir kart olur, sütun başlığı hücrenin üstünde yazar
+   (td'deki data-etiket). Tablet ve masaüstünde tablo aynen kalır. */
+@media (max-width: 767.98px) {
+  .yigin-tablo,
+  .yigin-tablo tbody,
+  .yigin-tablo tr,
+  .yigin-tablo td {
+    display: block;
+    width: 100%;
+  }
+  .yigin-tablo thead {
+    display: none;
+  }
+  .yigin-tablo tr {
+    padding: 0.5rem 0;
+  }
+  .yigin-tablo td {
+    padding: 0.375rem 1rem;
+    text-align: left;
+    max-width: none;
+  }
+  .yigin-tablo td[data-etiket]::before {
+    content: attr(data-etiket);
+    display: block;
+    margin-bottom: 0.125rem;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--color-stone-500);
+  }
+  .yigin-tablo td .justify-end {
+    justify-content: flex-start;
+  }
+}
+
 /* Custom scrollbar for diff and long lists */
 ::-webkit-scrollbar {
   width: 6px;

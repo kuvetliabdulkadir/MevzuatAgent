@@ -362,10 +362,10 @@ const KalemKarti: React.FC<{
           <div key={i} className="space-y-1">
             <div className="text-xs font-semibold text-stone-800">{d.bolum} — {d.tur}</div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              <pre className="text-xs font-sans whitespace-pre-wrap bg-rose-50/40 p-2.5 rounded-sm border border-rose-200 text-stone-700">
+              <pre className="text-xs font-sans whitespace-pre-wrap [overflow-wrap:anywhere] bg-rose-50/40 p-2.5 rounded-sm border border-rose-200 text-stone-700">
                 {d.eski || '(yok)'}
               </pre>
-              <pre className="text-xs font-sans whitespace-pre-wrap bg-emerald-50/40 p-2.5 rounded-sm border border-emerald-200 text-stone-800">
+              <pre className="text-xs font-sans whitespace-pre-wrap [overflow-wrap:anywhere] bg-emerald-50/40 p-2.5 rounded-sm border border-emerald-200 text-stone-800">
                 {d.yeni || '(kaldırıldı)'}
               </pre>
             </div>
@@ -378,7 +378,7 @@ const KalemKarti: React.FC<{
     {k.ozet && (
       <div className="text-xs text-stone-800"><strong>Özet:</strong> {k.ozet}
         {k.ozet_tablosu.length > 0 && (
-          <pre className="mt-1.5 text-[11px] whitespace-pre-wrap bg-paper-100 p-2.5 rounded-sm border border-paper-200">{k.ozet_tablosu.join('\n')}</pre>
+          <pre className="mt-1.5 text-[11px] whitespace-pre-wrap [overflow-wrap:anywhere] bg-paper-100 p-2.5 rounded-sm border border-paper-200">{k.ozet_tablosu.join('\n')}</pre>
         )}
       </div>
     )}
@@ -395,7 +395,7 @@ const KalemKarti: React.FC<{
         <summary className="cursor-pointer text-stone-500">
           Metin{k.ocr && <strong className="text-amber-700"> — otomatik okunmuş taslak</strong>}{k.kisaltildi && ' (ilk bölüm)'}
         </summary>
-        <pre className="mt-1.5 whitespace-pre-wrap font-sans bg-paper-100 p-3 rounded-sm border border-paper-200 max-h-72 overflow-y-auto">{k.metin}</pre>
+        <pre className="mt-1.5 whitespace-pre-wrap [overflow-wrap:anywhere] font-sans bg-paper-100 p-3 rounded-sm border border-paper-200 max-h-72 overflow-y-auto">{k.metin}</pre>
       </details>
     )}
     {/* Metin okunamadıysa uyarı ve kaynakça. */}

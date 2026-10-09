@@ -108,7 +108,7 @@ export const DenetimPage: React.FC = () => {
           {veri.kayitlar.length === 0 ? (
             <p className="p-8 text-center text-xs text-stone-500">Bu süzgeçle kayıt yok.</p>
           ) : (
-            <table className="w-full text-left text-xs min-w-[720px]">
+            <table className="yigin-tablo w-full text-left text-xs xl:min-w-[720px]">
               <thead className="bg-paper-100 border-b border-paper-300 text-stone-600 uppercase font-mono text-[11px]">
                 <tr>
                   <th className="px-4 py-3 font-semibold">Zaman</th>
@@ -139,11 +139,11 @@ export const DenetimPage: React.FC = () => {
 const Satir: React.FC<{ d: DenetimKaydi; acik: boolean; onTikla: () => void }> = ({ d, acik, onTikla }) => (
   <>
     <tr onClick={onTikla} className={`align-top cursor-pointer hover:bg-paper-50 ${UYARI.test(d.islem) ? 'bg-rose-50/50' : ''}`}>
-      <td className="px-4 py-2.5 whitespace-nowrap text-stone-600 font-mono">{tarihSaat(d.zaman)}</td>
-      <td className="px-4 py-2.5 text-stone-800">{d.kullanici ?? '—'}</td>
-      <td className={`px-4 py-2.5 font-medium ${UYARI.test(d.islem) ? 'text-rose-800' : 'text-stone-900'}`}>{islemAdi(d.islem)}</td>
-      <td className="px-4 py-2.5 text-stone-600 max-w-md truncate">{detayOzeti(d.detay)}</td>
-      <td className="px-4 py-2.5 text-stone-500 font-mono">{d.ip ?? '—'}</td>
+      <td className="px-4 py-2.5 whitespace-nowrap text-stone-600 font-mono" data-etiket="Zaman">{tarihSaat(d.zaman)}</td>
+      <td className="px-4 py-2.5 text-stone-800" data-etiket="Kişi">{d.kullanici ?? '—'}</td>
+      <td data-etiket="İşlem" className={`px-4 py-2.5 font-medium ${UYARI.test(d.islem) ? 'text-rose-800' : 'text-stone-900'}`}>{islemAdi(d.islem)}</td>
+      <td className="px-4 py-2.5 text-stone-600 max-w-md truncate" data-etiket="Ayrıntı">{detayOzeti(d.detay)}</td>
+      <td className="px-4 py-2.5 text-stone-500 font-mono" data-etiket="IP">{d.ip ?? '—'}</td>
     </tr>
     {/* Açıksa ayrıntı satırı (JSON olarak). */}
     {acik && (
