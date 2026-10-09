@@ -1,14 +1,24 @@
 """API dokümanı: genel açıklama, grupların sırası ve panel adreslerinin başlığı, açıklaması, yetkisi, hata cevapları.
 
-Panelin kendi arayüzü bu adresleri kullanır, şirket portalı da bizim arayüz yerine bunları kullanabilir. Açıklamalar
+Panelin kendi arayüzü bu adresleri kullanır. Portala açılanlar web/portal.py'de /api/v1 altına da eklenir, başlık ve
+açıklamaları buradan alır. Açıklamalar
 koddan ayrı burada durur, uç nokta değişince buradaki satır da güncellenir (test, bütün uç noktaların belgelendiğini kontrol eder).
 """
 
 from fastapi.routing import APIRoute
 
 ACIKLAMA = """
-Mevzuat Takip sisteminin API'si. Panelde yapılabilen her şey buradan da yapılır: mevzuat arama, rapor onayı ve
-gönderimi, tarama, kaynak, konu, alıcı grubu, ayarlar, kullanıcılar. Şirket portalı bizim arayüz yerine bunu kullanabilir.
+Mevzuat Takip sisteminin API'si. Mevzuat arama, rapor onayı ve gönderimi, tarama, kaynak, konu ve alıcı grubu
+yönetimi buradan yapılır. Şirket portalı bizim arayüz yerine bunu kullanabilir.
+
+## Sürümlü adresler
+
+Portalın kullanacağı adresler `/api/v1` ile başlar. Bu adreslerde alanların adı ve biçimi değişmez. Değişmesi
+gerekirse `/api/v2` açılır, v1 bir süre aynen çalışmaya devam eder. Cevaplara yeni alan eklenebilir, portal
+tanımadığı alanı görmezden gelmelidir.
+
+`/api/v1` ile başlamayan adresler (kullanıcılar, ayarlar, denetim kaydı, değişiklik geçmişi ve önceki hale döndürme,
+menü) panelin yönetim adresleridir. Sistem yöneticisi içindir, haber verilmeden değişebilir, portal kullanmamalıdır.
 
 ## Kimlik doğrulama
 
@@ -36,13 +46,12 @@ curl -H "Authorization: Bearer mvz_..." "https://mevzuat.firma.com.tr/api/v1/mev
 ## Kurallar
 
 - Gövdeler JSON'dur. Tarihler `YYYY-AA-GG`, zamanlar `YYYY-AA-GGTSS:DD`, Türkiye saatiyle.
-- **Mevzuat** grubundaki adresler sürümlüdür (`/api/v1`): alanlar değişirse yeni sürüm açılır, v1 aynı kalır.
-  Listeler sayfalıdır (`sayfa`, `adet` en fazla 100, cevapta `toplam`).
+- Mevzuat ve rapor listeleri sayfalıdır (`sayfa`, `adet` en fazla 100, cevapta `toplam`).
 - Düzenleme isteklerinde `surum` gönderilir (kaydın son okunduğu andaki sürüm). Kayıt bu arada değiştiyse `409` döner,
   kayıt yeniden okunup tekrar denenir.
 - Rapor durumları: `ONAY_BEKLIYOR` → onay ile `ONAYLANDI` → mailler gidince `GONDERILDI`, ya da ret ile `REDDEDILDI`.
 - Rapor onayında kalem numaraları `GET /api/v1/raporlar/{rapor_id}` cevabındaki kalemlerin `id`'si, alıcı grubu
-  numaraları `GET /api/gruplar` cevabındaki grupların `id`'sidir.
+  numaraları `GET /api/v1/gruplar` cevabındaki grupların `id`'sidir.
 
 ## Hata cevapları
 
@@ -60,18 +69,18 @@ Hata cevabı `{"detail": "açıklama"}` biçimindedir (422'de hatalı alanların
 
 # Dokümandaki grupların sırası ve açıklamaları.
 ETIKETLER = [
-    {"name": "Mevzuat", "description": "Mevzuat arama ve detayı (sürümlü, /api/v1)"},
-    {"name": "Kategoriler", "description": "Konular ve kaynakların listesi (sürümlü, /api/v1)"},
-    {"name": "Raporlar", "description": "Raporların okunması (sürümlü, /api/v1)"},
-    {"name": "Raporlar ve onay", "description": "Onay, ret, ek gönderim (raporlar Raporlar grubundan okunur)"},
-    {"name": "Tarama", "description": "Tarama saatleri ve şimdi tara"},
-    {"name": "Kaynaklar", "description": "Taranan sitelerin yönetimi"},
-    {"name": "Konular", "description": "Başlık filtresinin konuları ve anahtar kelimeleri"},
-    {"name": "Alıcı grupları", "description": "Raporların kime gideceği"},
-    {"name": "Ayarlar", "description": "Mail sunucusu, panel adresi, saklama süreleri"},
-    {"name": "Kullanıcılar", "description": "Panel kullanıcıları"},
-    {"name": "Denetim kaydı", "description": "Kim, ne zaman, ne yaptı"},
-    {"name": "Menü", "description": "Panel menüsü (veritabanından)"},
+    {"name": "Mevzuat", "description": "Mevzuat arama ve detayı (/api/v1)"},
+    {"name": "Kategoriler", "description": "Konular ve kaynakların listesi (/api/v1)"},
+    {"name": "Raporlar", "description": "Raporların okunması (/api/v1)"},
+    {"name": "Raporlar ve onay", "description": "Onay, ret, ek gönderim (/api/v1)"},
+    {"name": "Tarama", "description": "Tarama saatleri ve şimdi tara (/api/v1)"},
+    {"name": "Kaynaklar", "description": "Taranan sitelerin yönetimi (/api/v1, geçmiş ve geri alma panelin)"},
+    {"name": "Konular", "description": "Başlık filtresinin konuları ve anahtar kelimeleri (/api/v1, geçmiş ve geri alma panelin)"},
+    {"name": "Alıcı grupları", "description": "Raporların kime gideceği (/api/v1)"},
+    {"name": "Ayarlar", "description": "Mail sunucusu, panel adresi, saklama süreleri (panelin, sürümsüz)"},
+    {"name": "Kullanıcılar", "description": "Panel kullanıcıları (panelin, sürümsüz)"},
+    {"name": "Denetim kaydı", "description": "Kim, ne zaman, ne yaptı (panelin, sürümsüz)"},
+    {"name": "Menü", "description": "Panel menüsü (panelin, sürümsüz)"},
 ]
 
 # Dokümanda gösterilmeyen, sadece panel arayüzünün kullandığı adresler. API anahtarıyla gerekmezler (giriş, iki adımlı
@@ -82,6 +91,8 @@ GIZLI = {
     ("POST", "/api/parola-linki/kontrol"), ("POST", "/api/parola-linki/kullan"),
     ("GET", "/api/api-anahtarlari"), ("POST", "/api/api-anahtarlari"), ("POST", "/api/api-anahtarlari/{anahtar_id}/iptal"),
     ("GET", "/api/raporlar"), ("GET", "/api/raporlar/{rapor_id}"),
+    # Konu ve kaynak listeleri /api/v1/konular ve /api/v1/kaynaklar'dan okunur.
+    ("GET", "/api/kaynaklar"), ("GET", "/api/konular"),
 }
 
 # Başarılı cevap örnekleri (deneme sisteminin gerçek cevaplarından, kısaltılmış).
@@ -281,12 +292,13 @@ BELGE: dict[tuple[str, str], tuple[str, str, str, dict]] = {
 
 
 # Panel router'ının uç noktalarına başlık, açıklama ve hata cevaplarını yazar. Belgesi olmayan uç nokta olursa hata verir.
-def belgele(yollar: list) -> None:
+def belgele(yollar: list, gizli: set[tuple[str, str]] = frozenset()) -> None:
+    """gizli, dokümanda /api/v1 altında görünen panel adresleri, burada tekrar gösterilmez."""
     eksik = []
     for yol in yollar:
         if not isinstance(yol, APIRoute) or not yol.include_in_schema:
             continue
-        if all((yontem, yol.path) in GIZLI for yontem in yol.methods):
+        if all((yontem, yol.path) in GIZLI | gizli for yontem in yol.methods):
             yol.include_in_schema = False
             continue
         for yontem in yol.methods:

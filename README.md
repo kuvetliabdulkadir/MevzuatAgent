@@ -57,7 +57,7 @@ Panel sayfaları: Raporlar (onay) · Alıcı grupları · Kaynaklar · Konular �
 Sol menü veritabanından gelir (`menu_ogeleri`), her kullanıcı yetkisine uyan öğeleri görür.
 
 **API:** Panelde yapılabilen her şey API'den de yapılır, şirket portalı bizim arayüz yerine bunu kullanabilir.
-Mevzuat arama ve detayı sürümlüdür (`/api/v1`). Doküman (Swagger) `/api/dokuman` adresinde, doğrudan açılır (`MEVZUAT_DOKUMAN_ACIK=0` ise anahtar ister), HTML ya
+Portalın kullandığı adresler sürümlüdür (`/api/v1`): mevzuat arama, rapor onayı, tarama, kaynak, konu ve alıcı grubu. Biçimleri değişmez, gerekirse `/api/v2` açılır. Kullanıcı, ayar ve denetim adresleri panelin, sürümsüzdür. Doküman (Swagger) `/api/dokuman` adresinde, doğrudan açılır (`MEVZUAT_DOKUMAN_ACIK=0` ise anahtar ister), HTML ya
 da OpenAPI JSON olarak da indirilir. Anahtar `Authorization: Bearer mvz_...` biçiminde gönderilir, panelden ya da `api-anahtari-uret`
 komutuyla üretilir. Anahtar seçilen rolün (tam yetki, admin ya da onaylayıcı) yetkisiyle çalışır,
 süreli ya da süresiz olur, iptal edilebilir, her isteği denetim kaydına yazılır, kendisi değil özeti saklanır.
