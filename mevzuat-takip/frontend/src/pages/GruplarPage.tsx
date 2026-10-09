@@ -72,7 +72,7 @@ export const GruplarPage: React.FC = () => {
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs min-w-[760px]">
+              <table className="yigin-tablo w-full text-left text-xs xl:min-w-[760px]">
                 <thead className="bg-paper-100 border-b border-paper-300 text-stone-600 uppercase font-mono text-[11px]">
                   <tr>
                     <th className="px-5 py-3 font-semibold">Grup</th>
@@ -84,27 +84,27 @@ export const GruplarPage: React.FC = () => {
                 <tbody className="divide-y divide-paper-200">
                   {veri.gruplar.map((g) => (
                     <tr key={g.id} className={`align-top hover:bg-paper-50 ${g.aktif ? '' : 'opacity-60'}`}>
-                      <td className="px-5 py-4">
+                      <td className="px-5 py-4" data-etiket="Grup">
                         <div className="font-semibold text-stone-900">{g.ad}</div>
                         <div className="text-[10px] text-stone-500 mt-0.5">Güncellendi: {tarihSaat(g.guncellendi)}</div>
                       </td>
-                      <td className="px-5 py-4">
+                      <td className="px-5 py-4" data-etiket="İş kolları">
                         <div className="flex flex-wrap gap-1">
                           {g.is_kollari.map((ik) => (
                             <span key={ik} className="px-2 py-0.5 rounded-sm text-[10px] font-medium bg-petrol/10 text-petrol border border-petrol/20">{ik}</span>
                           ))}
                         </div>
                       </td>
-                      <td className="px-5 py-4">
+                      <td className="px-5 py-4" data-etiket="Adresler">
                         <div className="flex flex-col gap-1">
                           {g.adresler.map((a) => (
-                            <span key={a} className="inline-flex items-center gap-1.5 text-[11px] font-mono text-stone-700">
+                            <span key={a} className="inline-flex items-center gap-1.5 text-[11px] font-mono text-stone-700 break-all">
                               <Mail className="w-3 h-3 text-stone-400 shrink-0" />{a}
                             </span>
                           ))}
                         </div>
                       </td>
-                      <td className="px-5 py-4 text-right">
+                      <td className="px-5 py-4 text-right" data-etiket="Durum">
                         <div className="flex items-center justify-end gap-2">
                           <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${
                             g.aktif ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-stone-100 text-stone-500 border-stone-300'

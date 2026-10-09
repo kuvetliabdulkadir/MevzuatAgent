@@ -42,7 +42,7 @@ export const RaporlarPage: React.FC<RaporlarPageProps> = ({ kullanici, bekleyenl
             Günlük taramalarda bulunan ve firmanızı ilgilendiren kayıtlar rapor olarak onaya sunulur. Onaylanmadan kimseye gönderilmez.
           </p>
         </div>
-        <div className="flex items-center gap-1.5 bg-paper-200 p-1 rounded-lg border border-paper-300 text-xs overflow-x-auto max-w-full">
+        <div className="flex items-center gap-1.5 bg-paper-200 p-1 rounded-lg border border-paper-300 text-xs overflow-x-auto max-w-full shrink-0">
           <Filter className="w-3.5 h-3.5 text-stone-400 ml-2 shrink-0" />
           {sekme('bekleyen', `Onay Bekleyenler (${bekleyenler.length})`)}
           {sekme('gecmis', `Son Kararlar (${gecmis.length})`)}
