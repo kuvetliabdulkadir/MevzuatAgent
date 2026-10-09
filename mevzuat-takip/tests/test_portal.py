@@ -1,15 +1,21 @@
 """Mevzuat arama ve okuma adresleri (/api/v1): dış sistemlerin kullandığı, sürümlü, sadece okuma yapan adresler."""
 
-from datetime import date, datetime
+import json
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from mevzuat import rapor
-from mevzuat.db import AliciGrubu, Calisma, KaynakTanimi, Kayit, KonuTanimi, init_db
+from mevzuat import kaynak_bulucu, rapor
+from mevzuat import kaynak_yonetimi as ky
+from mevzuat import zamanlama as zm
+from mevzuat.db import AliciGrubu, Calisma, Denetim, KaynakTanimi, Kayit, KonuTanimi, Kullanici, init_db
+from mevzuat.http import make_client
 from mevzuat.web import uygulama_olustur
 from mevzuat.web.guvenlik import api_anahtari_uret, kullanici_ekle
 
@@ -69,6 +75,7 @@ def ortam():
         rapor_id = r.id
     client = TestClient(uygulama_olustur(engine, Posta(), [], "t" * 40, ek_ekle=False, arayuz=None))
     client.headers["Authorization"] = f"Bearer {anahtar}"
+    client.app.state.engine = engine
     return client, idler, rapor_id
 
 
@@ -145,3 +152,168 @@ def test_x_api_anahtari_basligi_da_calisir(ortam):
     dis = TestClient(client.app)
     assert dis.get("/api/v1/konular", headers={"X-API-Anahtari": anahtar}).status_code == 200
     assert dis.get("/api/v1/konular", headers={"Authorization": "Bearer mvz_yanlis"}).status_code == 401
+
+
+# --- yazma adresleri: panelin aynı işlemleri, sabit cevap biçimiyle
+
+def _anahtar(client, rol: str) -> dict:
+    with Session(client.app.state.engine) as s:
+        admin = s.scalars(select(Kullanici).where(Kullanici.rol == "admin")).one()
+        _, anahtar = api_anahtari_uret(s, f"Deneme {rol}", rol, None, admin)
+        s.commit()
+    return {"Authorization": f"Bearer {anahtar}"}
+
+
+def _yeni_rapor(client) -> tuple[int, int]:
+    with Session(client.app.state.engine) as s:
+        k = _kayit("k5", "Yeni Altın Tebliği", 8, {"Kıymetli madenler": ["altın"]}, ["Kuyum"])
+        s.add(k)
+        s.commit()
+        r = rapor.onaya_sun(s, Posta(), ["onay@firma.com"], bugun=date(2026, 10, 9))
+        return r.id, k.id
+
+
+def test_v1_karar_onay_ret_ve_gorev_ayriligi(ortam):
+    client, *_ = ortam
+    rapor_id, kalem = _yeni_rapor(client)
+    adres = f"/api/v1/raporlar/{rapor_id}/karar"
+    # Yönetici anahtarı rapor onaylayamaz, deneme denetime yazılır.
+    assert client.post(adres, json={"karar": "onayla", "dahil": [kalem]}, headers=_anahtar(client, "admin")).status_code == 403
+    cevap = client.post(adres, json={"karar": "onayla", "dahil": [kalem], "notu": "Portaldan."})
+    assert cevap.status_code == 200, cevap.text
+    assert set(cevap.json()) == {"tur", "mesaj"} and cevap.json()["tur"] == "basari"
+    assert client.post(adres, json={"karar": "reddet", "notu": "x"}).status_code == 409  # karar zaten verildi
+    assert client.get(f"/api/v1/raporlar/{rapor_id}").json()["durum"] in ("ONAYLANDI", "GONDERILDI")
+    assert client.post("/api/v1/raporlar/999/karar", json={"karar": "onayla"}).status_code == 404
+    assert client.post(adres, json={"karar": "belki"}).status_code == 422
+    with Session(client.app.state.engine) as s:
+        islemler = [d.islem for d in s.scalars(select(Denetim))]
+    assert "yetkisiz_karar_denemesi" in islemler and "onay" in islemler
+
+
+def test_v1_ek_gonderim(ortam):
+    client, idler, rapor_id = ortam
+    grup = client.get("/api/v1/gruplar").json()["gruplar"][0]["id"]
+    cevap = client.post(f"/api/v1/raporlar/{rapor_id}/ek-gonderim",
+                        json={"dahil": [idler["k3"]], "gruplar": [grup], "ek_adresler": ["mudur@firma.com"]})
+    assert cevap.status_code == 200, cevap.text
+    assert set(cevap.json()) == {"tur", "mesaj"}
+
+
+def test_v1_gruplar_sabit_bicim(ortam):
+    client, *_ = ortam
+    liste = client.get("/api/v1/gruplar").json()
+    assert set(liste) == {"gruplar", "is_kollari", "kapsanmayan"}
+    assert set(liste["gruplar"][0]) == {"id", "ad", "is_kollari", "adresler", "aktif", "guncellendi"}
+    yeni = client.post("/api/v1/gruplar", json={"ad": "Oto", "is_kollari": ["Oto kiralama"], "adresler": ["oto@firma.com"]})
+    assert yeni.status_code == 200 and yeni.json()["ad"] == "Oto"
+    adres = f"/api/v1/gruplar/{yeni.json()['id']}"
+    duzen = client.put(adres, json={"ad": "Oto", "adresler": ["oto@firma.com"], "is_kollari": ["Oto kiralama"], "aktif": False})
+    assert duzen.status_code == 200 and duzen.json()["aktif"] is False
+    assert client.put(adres, json={"ad": "Oto", "is_kollari": ["Ortak"], "adresler": ["bozuk"]}).status_code == 400
+    assert client.put("/api/v1/gruplar/999", json={"ad": "x"}).status_code == 404
+
+
+KONU = {"ad": "Döviz", "is_kollari": ["Ortak"], "kelimeler": ["döviz"], "aciklama": "Kur kararları."}
+KONU_ALANLARI = {"id", "ad", "aciklama", "is_kollari", "kelimeler", "haric", "dislanan", "aktif", "surum"}
+
+
+def test_v1_konu_ekle_duzenle_pasiflestir(ortam):
+    client, *_ = ortam
+    konu = client.post("/api/v1/konular", json=KONU)
+    assert konu.status_code == 200, konu.text
+    # Panelin listedeki ek alanları (eşleşme sayısı, kullanım, eski adlar) v1 cevabına girmez.
+    assert set(konu.json()) == KONU_ALANLARI
+    adres = f"/api/v1/konular/{konu.json()['id']}"
+    duzen = client.put(adres, json={**KONU, "kelimeler": ["döviz", "kur"], "surum": konu.json()["surum"]})
+    assert duzen.status_code == 200 and duzen.json()["kelimeler"] == ["döviz", "kur"]
+    assert client.put(adres, json={**KONU, "surum": konu.json()["surum"]}).status_code == 409  # eski sürüm
+    pasif = client.post(f"{adres}/pasif", json={"surum": duzen.json()["surum"]})
+    assert pasif.status_code == 200 and pasif.json()["aktif"] is False
+    assert "Döviz" not in [k["ad"] for k in client.get("/api/v1/konular").json()]
+    assert "Döviz" in [k["ad"] for k in client.get("/api/v1/konular?pasifler=true").json()]
+    assert client.post(f"{adres}/aktif", json={"surum": pasif.json()["surum"]}).json()["aktif"] is True
+    assert set(client.get("/api/v1/konular").json()[0]) == KONU_ALANLARI  # liste ve düzenleme aynı biçimde
+    assert client.post("/api/v1/konular", json={**KONU, "ad": "Boş", "kelimeler": []}).status_code == 400
+
+
+def test_v1_konu_onizleme(ortam):
+    client, *_ = ortam
+    cevap = client.post("/api/v1/konular/onizleme", json={"ad": "Deneme", "is_kollari": ["Ortak"], "kelimeler": ["yönetmelik"]})
+    assert cevap.status_code == 200, cevap.text
+    veri = cevap.json()
+    assert veri["gun"] == 90 and isinstance(veri["uyarilar"], list)
+    assert set(veri) == {"gun", "taranan", "ayni_kalan", "eslesecek_sayisi", "dusecek_sayisi", "eslesecek", "dusecek",
+                         "uyarilar"}
+
+
+YENI_KAYNAK = {"tip": "wordpress", "etiket": "BDDK Duyurusu",
+               "ayarlar": {"api_url": "https://www.bddk.org.tr/wp-json/wp/v2/posts"}, "varsayilan_konular": []}
+KAYNAK_ALANLARI = {"ad", "etiket", "tip", "aktif", "ayarlar", "varsayilan_konular", "kaldirildi", "surum"}
+
+
+def test_v1_kaynak_ekle_duzenle_kaldir(ortam, monkeypatch):
+    client, *_ = ortam
+    monkeypatch.setattr(ky, "_dns", lambda host: ["93.184.216.34"])
+    tipler = client.get("/api/v1/kaynak-tipleri").json()
+    assert "wordpress" in [t["tip"] for t in tipler["tipler"]] and "Vergi" in tipler["konular"]
+    kaynak = client.post("/api/v1/kaynaklar", json=YENI_KAYNAK)
+    assert kaynak.status_code == 200, kaynak.text
+    # Panel aynı istekte tarama sayılarını da döner, v1 cevabı sadece tanım.
+    assert set(kaynak.json()) == KAYNAK_ALANLARI and kaynak.json()["ad"] == "bddk_duyurusu"
+    adres = "/api/v1/kaynaklar/bddk_duyurusu"
+    duzen = client.put(adres, json={**YENI_KAYNAK, "etiket": "BDDK", "surum": kaynak.json()["surum"]})
+    assert duzen.status_code == 200 and duzen.json()["etiket"] == "BDDK"
+    assert client.put(adres, json={**YENI_KAYNAK, "surum": 1}).status_code == 409
+    kaldir = client.post(f"{adres}/kaldir", json={"surum": duzen.json()["surum"]})
+    assert kaldir.status_code == 200 and kaldir.json()["kaldirildi"] is True
+    assert "bddk_duyurusu" not in [k["ad"] for k in client.get("/api/v1/kaynaklar").json()]
+    assert "bddk_duyurusu" in [k["ad"] for k in client.get("/api/v1/kaynaklar?kaldirilanlar=true").json()]
+    assert client.post(f"{adres}/geri-getir", json={"surum": kaldir.json()["surum"]}).json()["kaldirildi"] is False
+    assert client.post("/api/v1/kaynaklar/yok/kaldir", json={"surum": 1}).status_code == 404
+    assert set(client.get("/api/v1/kaynaklar").json()[0]) == KAYNAK_ALANLARI
+
+
+def test_v1_kaynak_dene_ve_bul(ortam, monkeypatch):
+    client, *_ = ortam
+    monkeypatch.setattr(ky, "_dns", lambda host: ["93.184.216.34"])
+    yazi = json.loads((Path(__file__).parent / "fixtures" / "masak_posts.json").read_text(encoding="utf-8"))
+    monkeypatch.setattr(ky, "make_client", lambda **_: make_client(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=yazi, headers={"X-WP-TotalPages": "1"}))))
+    deneme = client.post("/api/v1/kaynaklar/dene", json=YENI_KAYNAK)
+    assert deneme.status_code == 200, deneme.text
+    assert set(deneme.json()) == {"kayitlar", "toplam", "kesildi", "gun"}
+    sayfa = "<html><head><title>Deneme Sitesi</title></head><body><p>Duyuru yok.</p></body></html>"
+    monkeypatch.setattr(kaynak_bulucu, "make_client", lambda **_: make_client(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, text=sayfa, headers={"Content-Type": "text/html"}))))
+    bul = client.post("/api/v1/kaynaklar/bul", json={"adres": "https://site.gov.tr/duyurular"})
+    assert bul.status_code == 200, bul.text
+    veri = bul.json()
+    assert veri["bulundu"] is False and veri["onerilen_ad"] == "Deneme Sitesi"
+    assert veri["adimlar"] and set(veri["adimlar"][0]) == {"yol", "sonuc", "not"}  # alan adı "not" olarak kalır
+
+
+def test_v1_tarama_ve_zamanlama(ortam):
+    client, *_ = ortam
+    zaman = client.get("/api/v1/zamanlama").json()
+    assert set(zaman) == {"saatler", "surum", "zamanlayici_calisiyor", "son_nabiz", "durum", "sonraki"}
+    yeni = client.put("/api/v1/zamanlama", json={"saatler": ["07:00", "19:00"], "surum": zaman["surum"]})
+    assert yeni.status_code == 200 and yeni.json()["saatler"] == ["07:00", "19:00"]
+    assert client.put("/api/v1/zamanlama", json={"saatler": ["07:00"], "surum": zaman["surum"]}).status_code == 409
+    assert client.post("/api/v1/tarama").status_code == 409  # zamanlayıcı çalışmıyor
+    with Session(client.app.state.engine) as s:
+        zm.nabiz_yaz(s, datetime.now() - timedelta(seconds=10), "bekliyor", datetime.now() + timedelta(hours=5),
+                     [time(7), time(19)])
+    tarama = client.post("/api/v1/tarama")
+    assert tarama.status_code == 200, tarama.text
+    assert set(tarama.json()) == {"istek", "son_calismalar", "zamanlama"} and tarama.json()["istek"]["durum"] == "BEKLIYOR"
+    assert client.post("/api/v1/tarama").status_code == 409  # zaten sırada
+    assert client.get("/api/v1/tarama/durum").json()["istek"]["id"] == tarama.json()["istek"]["id"]
+
+
+def test_panel_adresleri_aynen_calisir(ortam):
+    client, *_ = ortam
+    # Panelin kendi adresi v1'le aynı işi yapar ama kendi biçimiyle döner, v1 bundan etkilenmez.
+    assert client.get("/api/gruplar").json()["gruplar"][0]["adresler"] == ["gizli-adres@firma.com"]
+    assert "toplam_kayit" in client.get("/api/kaynaklar").json()["kaynaklar"][0]
+    assert "toplam_kayit" not in client.get("/api/v1/kaynaklar").json()[0]

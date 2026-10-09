@@ -100,8 +100,8 @@ Raporlar her taramadan sonra oluşur ve onay bekler. Onaylanınca alıcı grupla
 |---|---|---|
 | 4.1 | `GET /api/v1/raporlar?durum=ONAY_BEKLIYOR` | Onay bekleyen raporlar. Rapor `id`'sini not edin |
 | 4.2 | `GET /api/v1/raporlar/{rapor_id}` | `kalemler` listesi. Göndermek istediğiniz kalemlerin `id`'sini not edin |
-| 4.3 | `GET /api/gruplar` | Alıcı grupları. Grup `id`'lerini not edin |
-| 4.4 | `POST /api/raporlar/{rapor_id}/karar` (aşağıdaki gövde) | 200 `{"tur": "basari", "mesaj": "Onaylandı ve N adrese gönderildi."}` |
+| 4.3 | `GET /api/v1/gruplar` | Alıcı grupları. Grup `id`'lerini not edin |
+| 4.4 | `POST /api/v1/raporlar/{rapor_id}/karar` (aşağıdaki gövde) | 200 `{"tur": "basari", "mesaj": "Onaylandı ve N adrese gönderildi."}` |
 | 4.5 | `GET /api/v1/raporlar/{rapor_id}` | `durum` `GONDERILDI`, seçilmeyen kalemlerde `gonderildi: false`, `karar_notu` dolu |
 | 4.6 | 4.4'ü aynen tekrar | 409, zaten karar verilmiş |
 
@@ -112,7 +112,7 @@ Onay gövdesi (`dahil` kalem id'leri, `gruplar` grup id'leri, `ek_adresler` grup
 ```
 
 ```sh
-curl -s -X POST -H "$K" -H "Content-Type: application/json" "$A/api/raporlar/12/karar" \
+curl -s -X POST -H "$K" -H "Content-Type: application/json" "$A/api/v1/raporlar/12/karar" \
   -d '{"karar":"onayla","dahil":[101,102],"notu":"Deneme","gruplar":[1],"ek_adresler":["test@firma.com.tr"]}'
 ```
 
@@ -135,7 +135,7 @@ Onaylanmış rapordaki bir kalemi sonradan başka kişilere göndermek için:
 
 | # | İstek | Beklenen |
 |---|---|---|
-| 4.12 | `POST /api/raporlar/{rapor_id}/ek-gonderim` gövde `{"dahil": [103], "notu": "Size de gelsin.", "gruplar": [2], "ek_adresler": []}` | 200 "Ek gönderim hazırlandı ve N adrese gönderildi." |
+| 4.12 | `POST /api/v1/raporlar/{rapor_id}/ek-gonderim` gövde `{"dahil": [103], "notu": "Size de gelsin.", "gruplar": [2], "ek_adresler": []}` | 200 "Ek gönderim hazırlandı ve N adrese gönderildi." |
 | 4.13 | Aynı istek, reddedilmiş ya da onay bekleyen raporla | 409 |
 | 4.14 | `GET /api/denetim?islem=ek_gonderim` (Tam yetki/Yönetici) | Ek gönderim kaydı, kimin yaptığı "API: Test ekibi" |
 
@@ -143,11 +143,11 @@ Onaylanmış rapordaki bir kalemi sonradan başka kişilere göndermek için:
 
 | # | İstek | Beklenen |
 |---|---|---|
-| 5.1 | `GET /api/zamanlama` | Tarama saatleri, `zamanlayici_calisiyor: true`, sonraki tarama zamanı |
-| 5.2 | `POST /api/tarama` (gövdesiz) | 200, `istek.durum` `BEKLIYOR` |
+| 5.1 | `GET /api/v1/zamanlama` | Tarama saatleri, `zamanlayici_calisiyor: true`, sonraki tarama zamanı |
+| 5.2 | `POST /api/v1/tarama` (gövdesiz) | 200, `istek.durum` `BEKLIYOR` |
 | 5.3 | 5.2'yi hemen tekrar | 409, tarama zaten sırada |
-| 5.4 | `GET /api/tarama/durum` (30 sn arayla) | `BEKLIYOR` → `CALISIYOR` → `BITTI` (hata olursa `HATALI` ve `hata` alanı). `son_calismalar[0]` yeni kayıt sayısını verir |
-| 5.5 | `PUT /api/zamanlama` gövde `{"saatler": ["06:30", "18:00"], "surum": <5.1'deki surum>}` | 200, yeni saatler |
+| 5.4 | `GET /api/v1/tarama/durum` (30 sn arayla) | `BEKLIYOR` → `CALISIYOR` → `BITTI` (hata olursa `HATALI` ve `hata` alanı). `son_calismalar[0]` yeni kayıt sayısını verir |
+| 5.5 | `PUT /api/v1/zamanlama` gövde `{"saatler": ["06:30", "18:00"], "surum": <5.1'deki surum>}` | 200, yeni saatler |
 | 5.6 | 5.5'i eski `surum` ile tekrar | 409, kayıt bu arada değişti, önce yeniden okuyun |
 
 Not: 5.1'de `zamanlayici_calisiyor: false` ise zamanlayıcı servisi kapalıdır ve 5.2 409 döner. Bu sunucu tarafı
@@ -157,13 +157,13 @@ bir sorundur, sistem yöneticisine bildirin.
 
 | # | İstek | Beklenen |
 |---|---|---|
-| 6.1 | `GET /api/kaynak-tipleri` | Eklenebilecek kaynak tipleri ve alanları |
-| 6.2 | `POST /api/kaynaklar/bul` gövde `{"adres": "https://www.tcmb.gov.tr"}` | Sitede bulunan RSS/liste önerileri |
-| 6.3 | `POST /api/kaynaklar/dene` (aşağıdaki gövde) | Kaydetmeden çekilen örnek kayıtlar |
-| 6.4 | `POST /api/kaynaklar` (aynı gövde) | 200, yeni kaynak, `surum: 1` |
-| 6.5 | `PUT /api/kaynaklar/{ad}` gövdeye `"surum": 1` ekli, etiket değişik | 200, `surum: 2` |
-| 6.6 | `POST /api/kaynaklar/{ad}/kaldir` gövde `{"surum": 2}` | 200, `kaldirildi: true` |
-| 6.7 | `POST /api/kaynaklar/{ad}/geri-getir` gövde `{"surum": 3}` | 200, kaynak geri geldi |
+| 6.1 | `GET /api/v1/kaynak-tipleri` | Eklenebilecek kaynak tipleri ve alanları |
+| 6.2 | `POST /api/v1/kaynaklar/bul` gövde `{"adres": "https://www.tcmb.gov.tr"}` | Sitede bulunan RSS/liste önerileri |
+| 6.3 | `POST /api/v1/kaynaklar/dene` (aşağıdaki gövde) | Kaydetmeden çekilen örnek kayıtlar |
+| 6.4 | `POST /api/v1/kaynaklar` (aynı gövde) | 200, yeni kaynak, `surum: 1` |
+| 6.5 | `PUT /api/v1/kaynaklar/{ad}` gövdeye `"surum": 1` ekli, etiket değişik | 200, `surum: 2` |
+| 6.6 | `POST /api/v1/kaynaklar/{ad}/kaldir` gövde `{"surum": 2}` | 200, `kaldirildi: true` |
+| 6.7 | `POST /api/v1/kaynaklar/{ad}/geri-getir` gövde `{"surum": 3}` | 200, kaynak geri geldi |
 | 6.8 | `GET /api/kaynaklar/{ad}/gecmis` | Yapılan her değişiklik, kim yaptı |
 
 ```json
@@ -172,10 +172,10 @@ bir sorundur, sistem yöneticisine bildirin.
 
 | # | İstek | Beklenen |
 |---|---|---|
-| 6.9 | `POST /api/konular/onizleme` (aşağıdaki gövde) | Son 90 günde bu kelimelere uyacak başlıklar, kaydetmez |
-| 6.10 | `POST /api/konular` (aynı gövde) | 200, yeni konu |
-| 6.11 | `PUT /api/konular/{konu_id}` kelime eklenmiş, `surum` ile | 200 |
-| 6.12 | `POST /api/konular/{konu_id}/pasif` gövde `{"surum": ...}` | 200, `aktif: false`. Güncel metni takip edilen bir mevzuatın kullandığı konu pasifleşmez (400) |
+| 6.9 | `POST /api/v1/konular/onizleme` (aşağıdaki gövde) | Son 90 günde bu kelimelere uyacak başlıklar, kaydetmez |
+| 6.10 | `POST /api/v1/konular` (aynı gövde) | 200, yeni konu |
+| 6.11 | `PUT /api/v1/konular/{konu_id}` kelime eklenmiş, `surum` ile | 200 |
+| 6.12 | `POST /api/v1/konular/{konu_id}/pasif` gövde `{"surum": ...}` | 200, `aktif: false`. Güncel metni takip edilen bir mevzuatın kullandığı konu pasifleşmez (400) |
 | 6.13 | `POST /api/konular/{konu_id}/geri-al` gövde `{"denetim_id": <gecmis'ten>, "surum": ...}` | 200, konu o anki haline döner |
 
 ```json
@@ -186,10 +186,10 @@ bir sorundur, sistem yöneticisine bildirin.
 
 | # | İstek | Beklenen |
 |---|---|---|
-| 7.1 | `POST /api/gruplar` gövde `{"ad": "Test Grubu", "is_kollari": ["Kuyum"], "adresler": ["test@firma.com.tr"], "aktif": true}` | 200, yeni grup |
-| 7.2 | `PUT /api/gruplar/{grup_id}` adres eklenmiş | 200 |
-| 7.3 | `POST /api/gruplar` `"adresler": ["bozuk"]` | 400, geçersiz adres |
-| 7.4 | `GET /api/gruplar` | `kapsanmayan`: hiçbir grubun almadığı iş kolları |
+| 7.1 | `POST /api/v1/gruplar` gövde `{"ad": "Test Grubu", "is_kollari": ["Kuyum"], "adresler": ["test@firma.com.tr"], "aktif": true}` | 200, yeni grup |
+| 7.2 | `PUT /api/v1/gruplar/{grup_id}` adres eklenmiş | 200 |
+| 7.3 | `POST /api/v1/gruplar` `"adresler": ["bozuk"]` | 400, geçersiz adres |
+| 7.4 | `GET /api/v1/gruplar` | `kapsanmayan`: hiçbir grubun almadığı iş kolları |
 
 ## 8. Ayarlar, kullanıcılar, denetim
 
@@ -218,7 +218,7 @@ Her rolün yapabildikleri:
 | # | İstek | Beklenen |
 |---|---|---|
 | 9.1 | Onaylayıcı anahtarıyla `GET /api/ayarlar` | 403 |
-| 9.2 | Yönetici anahtarıyla `POST /api/raporlar/{id}/karar` | 403, denetimde `yetkisiz_karar_denemesi` |
+| 9.2 | Yönetici anahtarıyla `POST /api/v1/raporlar/{id}/karar` | 403, denetimde `yetkisiz_karar_denemesi` |
 | 9.3 | Swagger'da Authorize → Logout, sonra herhangi bir istek | 401 |
 | 9.4 | Panelde anahtarı **İptal et**, sonra aynı anahtarla istek | 401 |
 | 9.5 | Süresi geçmiş anahtarla istek | 401 |

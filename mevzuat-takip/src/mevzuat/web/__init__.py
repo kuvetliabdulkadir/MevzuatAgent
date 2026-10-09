@@ -1391,14 +1391,17 @@ def uygulama_olustur(
         return Response(_tek_dosya_dokuman(sema, klasor), media_type="text/html; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="mevzuat-api-{tarih}.html"'})
 
-    # Her uç noktanın başlığı, açıklaması, yetkisi ve hata cevapları (web/panel_belgesi.py).
-    panel_belgesi.belgele(api.routes)
+    # Sürümlü adresler (/api/v1), portal bunları kullanır. Mevzuat okuma kendi fonksiyonlarıyla, onay, tarama, kaynak,
+    # konu ve alıcı grubu panelin aynı fonksiyonlarıyla ama sabit cevap biçimiyle (web/portal.py).
+    portal_yolu = portal.portal_api(Oturum, giris_gerekli, [Depends(csrf_dogrula), *anahtar_semalari])
+    surumlu = portal.yazma_adreslerini_ekle(portal_yolu, api.routes, panel_belgesi.BELGE, API_GRUPLARI)
+    # Her uç noktanın başlığı, açıklaması, yetkisi ve hata cevapları (web/panel_belgesi.py). v1'e açılan panel adresleri
+    # dokümanda tekrar görünmez, panel onları kullanmaya devam eder.
+    panel_belgesi.belgele(api.routes, gizli=surumlu)
     # Dokümanda uç noktalar adreslerine göre gruplanır.
     for yol in api.routes:
         if isinstance(yol, APIRoute):
             yol.tags = [API_GRUPLARI.get(yol.path.split("/")[2], "Diğer")]
-    # Mevzuat arama ve okuma adresleri (/api/v1), sürümlü, dokümanın ilk grubu.
-    portal_yolu = portal.portal_api(Oturum, giris_gerekli, [Depends(csrf_dogrula), *anahtar_semalari])
     # API adreslerini uygulamaya ekle. Portal önce, /api/{...} genel adresi ona da 404 vermesin.
     app.include_router(portal_yolu)
     app.include_router(api)

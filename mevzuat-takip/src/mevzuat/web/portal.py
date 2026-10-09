@@ -1,14 +1,15 @@
-"""Mevzuat arama ve okuma adresleri (/api/v1). Dış sistemlerin (şirket portalı vb.) mevzuatı, konuları, kaynakları
-ve raporları okuduğu, sürümlü adresler. Alanlar değişirse yeni sürüm (/api/v2) açılır, v1 bozulmaz.
+"""Sürümlü adresler (/api/v1). Dış sistemlerin (şirket portalı vb.) mevzuatı okuduğu, raporu onayladığı, taramayı,
+kaynakları, konuları ve alıcı gruplarını yönettiği adresler. Alanlar değişirse yeni sürüm (/api/v2) açılır, v1 bozulmaz.
 Kimlik doğrulama her istekte API anahtarıyla yapılır (Authorization: Bearer). Dokümanın açıklaması web/panel_belgesi.py'de.
 """
 
 from collections.abc import Callable
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from fastapi.routing import APIRoute
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -72,17 +73,27 @@ class MevzuatListesi(BaseModel):
 
 
 class Konu(BaseModel):
+    id: int = Field(description="Konu numarası, düzenleme adreslerinde kullanılır", examples=[1])
     ad: str = Field(examples=["Kıymetli madenler ve kuyumculuk"])
     aciklama: str = Field(description="Bu konu şirketi neden ilgilendiriyor", examples=["Kuyum işletmelerini doğrudan etkiler."])
     is_kollari: list[str] = Field(examples=[["Kuyum", "Döviz/Altın"]])
     kelimeler: list[str] = Field(description="Başlık ve metinde aranan kelimeler", examples=[["altın", "kıymetli maden"]])
+    haric: list[str] = Field(description="Kelime geçse de eşleşme sayılmayan ifadeler", examples=[["altında", "altıncı"]])
+    dislanan: list[str] = Field(description="Başlıkta geçerse kayıt bu konuya hiç girmez", examples=[[]])
+    aktif: bool = Field(description="Pasif konu süzmede kullanılmaz", examples=[True])
+    surum: int = Field(description="Düzenlerken gönderilir, kayıt bu arada değiştiyse 409 döner", examples=[2])
 
 
 class Kaynak(BaseModel):
-    ad: str = Field(description="Kod adı, /mevzuat?kaynak= filtresinde kullanılır", examples=["resmi_gazete"])
+    ad: str = Field(description="Kod adı, /mevzuat?kaynak= filtresinde ve düzenleme adreslerinde kullanılır",
+                    examples=["resmi_gazete"])
     etiket: str = Field(examples=["Resmî Gazete"])
-    tip: str = Field(examples=["resmi_gazete"])
+    tip: str = Field(description="Okuma yolu, /kaynak-tipleri listesindeki tip", examples=["resmi_gazete"])
     aktif: bool = Field(examples=[True])
+    ayarlar: dict = Field(description="Tipe özel ayarlar (adres, seçiciler), alanları /kaynak-tipleri'nde", examples=[{}])
+    varsayilan_konular: list[str] = Field(description="Kaynağın her kaydı bu konulara uymuş sayılır", examples=[[]])
+    kaldirildi: bool = Field(description="Kaldırılan kaynak taranmaz, geri getirilebilir", examples=[False])
+    surum: int = Field(description="Düzenlerken gönderilir, kayıt bu arada değiştiyse 409 döner", examples=[1])
 
 
 class RaporOzeti(BaseModel):
@@ -109,6 +120,147 @@ class RaporKalemi(MevzuatOzeti):
 class RaporDetayi(RaporOzeti):
     karar_notu: str | None = Field(description="Onaylayıcının notu ya da ret sebebi", examples=["Vergi kalemine dikkat."])
     kalemler: list[RaporKalemi]
+
+
+class Mesaj(BaseModel):
+    tur: Literal["basari", "hata"] = Field(description="hata ise işlem kaydedildi ama mail gönderiminde sorun var",
+                                           examples=["basari"])
+    mesaj: str = Field(examples=["Onaylandı ve 2 adrese gönderildi."])
+
+
+class Grup(BaseModel):
+    id: int = Field(examples=[1])
+    ad: str = Field(examples=["Kuyum Ekibi"])
+    is_kollari: list[str] = Field(description="Grup bu iş kollarındaki kalemleri alır", examples=[["Kuyum", "Ortak"]])
+    adresler: list[str] = Field(examples=[["kuyum@firma.com.tr"]])
+    aktif: bool = Field(examples=[True])
+    guncellendi: str | None = Field(examples=["2026-10-08T14:18"])
+
+
+class GrupListesi(BaseModel):
+    gruplar: list[Grup]
+    is_kollari: list[str] = Field(description="Gruba verilebilecek iş kolları", examples=[["Döviz/Altın", "Kuyum", "Ortak"]])
+    kapsanmayan: list[str] = Field(description="Hiçbir aktif grubun almadığı iş kolları, bu kalemler kimseye gitmez",
+                                   examples=[["Oto kiralama"]])
+
+
+class TipAlani(BaseModel):
+    ad: str = Field(description="ayarlar içindeki anahtar", examples=["akis_url"])
+    etiket: str = Field(examples=["Akış adresi"])
+    tur: str = Field(description="url, metin, sayi ya da secim_listesi", examples=["url"])
+    aciklama: str
+    zorunlu: bool
+    varsayilan: Any = None
+    secenekler: dict[str, str] | None = Field(None, description="secim_listesi için değerden görünen ada")
+
+
+class KaynakTipi(BaseModel):
+    tip: str = Field(examples=["rss"])
+    etiket: str = Field(examples=["RSS / Atom akışı"])
+    aciklama: str
+    eklenebilir: bool = Field(description="false ise bu tipte yeni kaynak eklenemez, var olan düzenlenir")
+    alanlar: list[TipAlani]
+
+
+class KaynakTipleri(BaseModel):
+    tipler: list[KaynakTipi]
+    konular: list[str] = Field(description="varsayilan_konular alanına yazılabilecek konu adları")
+
+
+class DenemeSatiri(BaseModel):
+    baslik: str
+    tarih: date
+    kaynakca: str
+    eslesen: dict[str, list[str]] = Field(description="Uyduğu konular ve yakalanan kelimeler, boşsa ilgisiz")
+    is_kollari: list[str]
+
+
+class KaynakDenemesi(BaseModel):
+    kayitlar: list[DenemeSatiri] = Field(description="Bulunan duyurular, en fazla 100")
+    toplam: int
+    kesildi: bool = Field(description="100'den fazla duyuru bulunduysa true")
+    gun: int = Field(description="Kaç gün geriye bakıldı", examples=[7])
+
+
+class Ornek(BaseModel):
+    baslik: str
+    tarih: date
+    url: str
+
+
+class BulmaAdimi(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    yol: str = Field(examples=["RSS"])
+    sonuc: str = Field(description="bulundu ya da yok", examples=["bulundu"])
+    not_: str = Field(alias="not", examples=["Sitenin duyuru akışı (RSS/Atom) bulundu."])
+
+
+class KaynakBulma(BaseModel):
+    bulundu: bool
+    tip: str | None = Field(None, description="Bulunduysa kaynak eklerken gönderilecek tip", examples=["rss"])
+    tip_etiketi: str | None = None
+    ayarlar: dict | None = Field(None, description="Bulunduysa kaynak eklerken gönderilecek ayarlar")
+    aciklama: str
+    onerilen_ad: str = Field(description="Sayfanın başlığı, etiket için öneri")
+    ornekler: list[Ornek] = Field(default_factory=list, description="Okunan ilk duyurular")
+    icerik_ornegi: str | None = Field(None, description="Duyuru sayfasından okunan metnin başı")
+    adimlar: list[BulmaAdimi] = Field(description="Denenen yollar ve sonuçları")
+
+
+class OnizlemeSatiri(BaseModel):
+    baslik: str
+    tarih: date
+    kaynak: str
+    kelimeler: list[str]
+    baska_konular: list[str] | None = Field(None, description="Düşecek kayıt başka konulara yine uyuyorsa onlar")
+
+
+class KonuOnizleme(BaseModel):
+    gun: int = Field(examples=[90])
+    taranan: int = Field(description="Bakılan başlık sayısı")
+    ayni_kalan: int
+    eslesecek_sayisi: int
+    dusecek_sayisi: int
+    eslesecek: list[OnizlemeSatiri] = Field(description="Yeni tanımla eşleşecek, şimdi eşleşmeyenler")
+    dusecek: list[OnizlemeSatiri] = Field(description="Şimdi eşleşen, yeni tanımla düşecekler")
+    uyarilar: list[str] = Field(description="Kaydı engellemeyen uyarılar")
+
+
+class Zamanlama(BaseModel):
+    saatler: list[str] = Field(description="Planlı tarama saatleri, Türkiye saati", examples=[["06:30", "18:00"]])
+    surum: int = Field(examples=[1])
+    zamanlayici_calisiyor: bool
+    son_nabiz: str | None = Field(examples=["2026-10-08T14:20:00"])
+    durum: str | None = Field(description="Zamanlayıcının o an ne yaptığı", examples=["bekliyor"])
+    sonraki: str | None = Field(description="Sonraki planlı tarama", examples=["2026-10-08T18:04"])
+
+
+class CalismaOzeti(BaseModel):
+    id: int
+    baslangic: str
+    bitis: str | None
+    durum: str = Field(description="CALISIYOR, BASARILI ya da HATALI", examples=["BASARILI"])
+    yeni: dict[str, int | None] = Field(description="Kaynak başına yeni kayıt sayısı", examples=[{"resmi_gazete": 14}])
+    yeni_toplam: int
+    hata: str | None
+
+
+class TaramaIstegi(BaseModel):
+    id: int
+    durum: str = Field(description="BEKLIYOR, CALISIYOR, BITTI ya da HATALI", examples=["BEKLIYOR"])
+    istendi: str
+    basladi: str | None
+    bitti: str | None
+    isteyen: str | None
+    calisma: CalismaOzeti | None
+    rapor_id: int | None = Field(description="Tarama sonunda oluşan rapor, yeni kayıt yoksa null")
+    hata: str | None
+
+
+class TaramaDurumu(BaseModel):
+    istek: TaramaIstegi | None = Field(description="En son şimdi tara isteği")
+    son_calismalar: list[CalismaOzeti] = Field(description="Son 5 tarama")
+    zamanlama: Zamanlama
 
 
 HATALAR = {
@@ -215,20 +367,27 @@ def portal_api(oturum: Callable[[], Session], giris_gerekli: Callable, guvenlik_
 
     @api.get("/konular", response_model=list[Konu], dependencies=[Depends(kimlik)], tags=["Kategoriler"],
              summary="Konular (kategoriler)")
-    def konular():
+    def konular(pasifler: bool = Query(False, description="true verilirse pasif konular da gelir")):
         """Mevzuatın süzüldüğü konular. Bir kayıt bir ya da birden çok konuya uyar, /mevzuat?konu= ile süzülür."""
         with oturum() as db:
-            return [{"ad": k.ad, "aciklama": k.aciklama or "", "is_kollari": k.is_kollari, "kelimeler": k.kelimeler}
-                    for k in db.scalars(select(KonuTanimi).where(KonuTanimi.aktif).order_by(KonuTanimi.ad))]
+            sorgu = select(KonuTanimi).order_by(KonuTanimi.ad)
+            if not pasifler:
+                sorgu = sorgu.where(KonuTanimi.aktif)
+            return [{"id": k.id, "ad": k.ad, "aciklama": k.aciklama or "", "is_kollari": k.is_kollari,
+                     "kelimeler": k.kelimeler, "haric": k.haric, "dislanan": k.dislanan, "aktif": k.aktif,
+                     "surum": k.surum} for k in db.scalars(sorgu)]
 
     @api.get("/kaynaklar", response_model=list[Kaynak], dependencies=[Depends(kimlik)], tags=["Kategoriler"],
              summary="Taranan kaynaklar")
-    def kaynaklar():
+    def kaynaklar(kaldirilanlar: bool = Query(False, description="true verilirse kaldırılan kaynaklar da gelir")):
         """Mevzuatın toplandığı kaynaklar (Resmî Gazete, MASAK, GİB ...). /mevzuat?kaynak= ile süzülür."""
         with oturum() as db:
-            return [{"ad": k.ad, "etiket": k.etiket, "tip": k.tip, "aktif": k.aktif}
-                    for k in db.scalars(select(KaynakTanimi).where(KaynakTanimi.kaldirildi.is_(False))
-                                        .order_by(KaynakTanimi.sira))]
+            sorgu = select(KaynakTanimi).order_by(KaynakTanimi.sira)
+            if not kaldirilanlar:
+                sorgu = sorgu.where(KaynakTanimi.kaldirildi.is_(False))
+            return [{"ad": k.ad, "etiket": k.etiket, "tip": k.tip, "aktif": k.aktif, "ayarlar": dict(k.ayarlar),
+                     "varsayilan_konular": list(k.varsayilan_konular), "kaldirildi": k.kaldirildi, "surum": k.surum}
+                    for k in db.scalars(sorgu)]
 
     @api.get("/raporlar", response_model=RaporListesi, dependencies=[Depends(kimlik)], tags=["Raporlar"],
              summary="Raporlar")
@@ -263,3 +422,55 @@ def portal_api(oturum: Callable[[], Session], giris_gerekli: Callable, guvenlik_
             return {**_rapor_ozeti(r), "karar_notu": r.karar_notu, "kalemler": kalemler}
 
     return api
+
+
+# --- yazma adresleri
+
+# Panelin /api adreslerinden v1'e de açılanlar ve cevaplarının sabit biçimi. İş kuralları (yetki, görev ayrılığı,
+# denetim kaydı) panelin fonksiyonlarında tek yerde kalır. Cevap bu modellerden geçer, panelin eklediği alan v1'e
+# sızmaz, panelde bir alanın adı değişirse cevap modele uymaz ve testler yakalar.
+YAZMA_ADRESLERI: dict[tuple[str, str], type[BaseModel]] = {
+    ("POST", "/api/raporlar/{rapor_id}/karar"): Mesaj,
+    ("POST", "/api/raporlar/{rapor_id}/ek-gonderim"): Mesaj,
+    ("GET", "/api/gruplar"): GrupListesi,
+    ("POST", "/api/gruplar"): Grup,
+    ("PUT", "/api/gruplar/{grup_id}"): Grup,
+    ("GET", "/api/kaynak-tipleri"): KaynakTipleri,
+    ("POST", "/api/kaynaklar"): Kaynak,
+    ("PUT", "/api/kaynaklar/{ad}"): Kaynak,
+    ("POST", "/api/kaynaklar/{ad}/kaldir"): Kaynak,
+    ("POST", "/api/kaynaklar/{ad}/geri-getir"): Kaynak,
+    ("POST", "/api/kaynaklar/dene"): KaynakDenemesi,
+    ("POST", "/api/kaynaklar/bul"): KaynakBulma,
+    ("POST", "/api/konular"): Konu,
+    ("PUT", "/api/konular/{konu_id}"): Konu,
+    ("POST", "/api/konular/{konu_id}/pasif"): Konu,
+    ("POST", "/api/konular/{konu_id}/aktif"): Konu,
+    ("POST", "/api/konular/onizleme"): KonuOnizleme,
+    ("GET", "/api/zamanlama"): Zamanlama,
+    ("PUT", "/api/zamanlama"): Zamanlama,
+    ("GET", "/api/tarama/durum"): TaramaDurumu,
+    ("POST", "/api/tarama"): TaramaDurumu,
+}
+
+
+def yazma_adreslerini_ekle(api: APIRouter, panel_yollari: list, belge: dict, gruplar: dict[str, str]) -> set[tuple[str, str]]:
+    """YAZMA_ADRESLERI'ndeki panel adreslerini aynı fonksiyonla /api/v1 altına da ekler. belge panel_belgesi.BELGE,
+    gruplar adresin ilk parçasından dokümandaki gruba. Eklenen panel adreslerini döner, bunlar dokümanda gizlenir."""
+    eklenen = set()
+    for yol in panel_yollari:
+        if not isinstance(yol, APIRoute):
+            continue
+        for yontem in yol.methods:
+            model = YAZMA_ADRESLERI.get((yontem, yol.path))
+            if model is None:
+                continue
+            baslik, aciklama, yetki, hatalar = belge[(yontem, yol.path)]
+            alt = yol.path.removeprefix("/api")
+            api.add_api_route(alt, yol.endpoint, methods=[yontem], response_model=model, summary=baslik,
+                              description=f"{aciklama}\n\n**Yetki:** {yetki}".strip(), responses=hatalar,
+                              tags=[gruplar[alt.split("/")[1]]])
+            eklenen.add((yontem, yol.path))
+    if eksik := set(YAZMA_ADRESLERI) - eklenen:
+        raise RuntimeError(f"v1'e açılacak panel adresi bulunamadı: {sorted(eksik)}")
+    return eklenen

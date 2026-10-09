@@ -477,18 +477,21 @@ def test_api_dokumani_giris_ister_ve_csp_ile_uyumlu(migrasyonlu):
     sema = client.get("/api/dokuman/openapi.json").json()
     assert sema["info"]["title"] == "Mevzuat Takip API"
     assert {"/api/v1/mevzuat", "/api/v1/mevzuat/{kayit_id}", "/api/v1/konular", "/api/v1/raporlar"} <= set(sema["paths"])
-    assert "/api/raporlar/{rapor_id}/ek-gonderim" in sema["paths"] and "/api/menu" in sema["paths"]
+    assert "/api/v1/raporlar/{rapor_id}/ek-gonderim" in sema["paths"] and "/api/menu" in sema["paths"]
     assert list(sema["components"]["securitySchemes"]) == ["HTTPBearer"]
     # Panelin kendi girişi, anahtar yönetimi ve tekrar eden rapor okuma dokümanda yok, adresler yine çalışır.
     gizli = ("/api/giris", "/api/oturum", "/api/parolam", "/api/api-anahtarlari", "/api/raporlar", "/api/raporlar/{rapor_id}")
     assert not any(p in sema["paths"] for p in gizli)
-    assert sema["paths"]["/api/gruplar"]["get"]["responses"]["200"]["content"]["application/json"]["example"]["gruplar"]
+    # v1'e açılan panel adresleri dokümanda sadece v1 altında, cevapları sabit modelle.
+    assert "/api/gruplar" not in sema["paths"] and "/api/raporlar/{rapor_id}/karar" not in sema["paths"]
+    gruplar_cevabi = sema["paths"]["/api/v1/gruplar"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert gruplar_cevabi == {"$ref": "#/components/schemas/GrupListesi"}
     assert [e["name"] for e in sema["tags"]][:2] == ["Mevzuat", "Kategoriler"]
     # Her panel uç noktası belgeli: Türkçe başlık, yetki satırı, hata cevapları.
     for yol, islemler in sema["paths"].items():
         for yontem, islem in islemler.items():
             assert yol.startswith("/api/v1/") or "**Yetki:**" in islem["description"], (yontem, yol)
-    karar = sema["paths"]["/api/raporlar/{rapor_id}/karar"]["post"]
+    karar = sema["paths"]["/api/v1/raporlar/{rapor_id}/karar"]["post"]
     assert karar["summary"] == "Raporu onayla ya da reddet" and {"400", "401", "403", "404", "409"} <= set(karar["responses"])
     assert sema["components"]["schemas"]["KararIstegi"]["examples"][0]["karar"] == "onayla"
     # Arayüz dosyaları, sağlık ve doküman adresleri dokümanda yok, her uç nokta bir grupta.
