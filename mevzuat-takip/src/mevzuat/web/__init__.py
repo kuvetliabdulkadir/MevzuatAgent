@@ -37,6 +37,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.security import HTTPBearer
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.routing import APIRoute
+from starlette.concurrency import run_in_threadpool
 # pydantic BaseModel gelen JSON'un yapısını tarif eder ve otomatik kontrol eder, eksik ya da yanlış tipte alan gelirse 422 hatası döner.
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
@@ -61,7 +62,7 @@ from mevzuat.db import (
 )
 from mevzuat.http import make_client
 from mevzuat.mail import DosyaGonderici, Mail, MailGonderici
-from mevzuat.web import guvenlik, panel_belgesi, portal
+from mevzuat.web import guvenlik, imza, panel_belgesi, portal
 from mevzuat.web.guvenlik import denetle, giris_dene
 
 log = logging.getLogger(__name__)
@@ -79,6 +80,22 @@ KURTARMA_ROLLERI = ("admin", TAM_ROL)
 API_ROLU = "api"  # panele girer ama sadece API dokümanını görür, istek atmak için API anahtarı gerekir
 # API kullanıcısının oturumla erişebildiği adresler, gerisi API anahtarı ister.
 API_ROLU_ADRESLERI = ("/api/menu", "/api/dokuman/openapi.json", "/api/dokuman/indir", "/api/parolam")
+# Dokümandaki Authorize penceresinde görünen açıklama.
+IMZA_ACIKLAMASI = (
+    "API anahtarınızı girin. Bu sayfa anahtarı göndermez, her isteği onunla imzalar.\n\n"
+    "Kendi sunucunuzdan istek atarken de anahtar gönderilmez. Her isteğe şu başlıklar eklenir:\n\n"
+    "- `X-Anahtar`: anahtarın ilk 10 karakteri\n"
+    "- `X-Zaman`: şimdiki zaman, Unix saniyesi\n"
+    "- `X-Numara`: her istekte yeni, 16-64 karakter rastgele değer (harf, rakam, - ve _)\n"
+    "- `X-Imza`: aşağıdaki metnin anahtarla HMAC-SHA256 özeti, küçük harf hex\n\n"
+    "İmzalanan metin, satırlar \\n ile birleşir: yöntem (GET), adres (/api/v1/mevzuat), sorgu (q=altin&sayfa=1, "
+    "yoksa boş), X-Zaman, X-Numara, gövdenin SHA-256 özeti (küçük harf hex, gövde yoksa boş metnin özeti).\n\n"
+    "Aynı numara ikinci kez kabul edilmez, 5 dakikadan eski istek kabul edilmez, anahtar başına dakikada en fazla 300 istek."
+)
+# Dış sistemlerin adresleri bununla başlar.
+SURUMLU_ON_EK = "/api/v1/"
+# Tarayıcıda yeni sekmede açılabilen adresler, doküman sayfası ve indirilen doküman. Diğer API adresleri açılmaz.
+TARAYICIDA_ACILANLAR = ("/api/dokuman", "/api/dokuman/indir")
 # Dış sistemlerin API anahtarını gönderdiği başlık.
 API_BASLIGI = "X-API-Anahtari"  # eski biçim, hâlâ kabul edilir ama dokümanda sadece "Authorization: Bearer" var
 # Aynı anahtarın son kullanım zamanı en fazla dakikada bir yazılır.
@@ -104,7 +121,7 @@ GUVENLIK_BASLIKLARI = {
 # API dokümanında uç noktaların grupları, adresin /api/ sonrasındaki ilk parçasına göre.
 API_GRUPLARI = {
     "oturum": "Oturum ve giriş", "giris": "Oturum ve giriş", "cikis": "Oturum ve giriş", "parolam": "Oturum ve giriş",
-    "parola-linki": "Oturum ve giriş", "menu": "Menü", "raporlar": "Raporlar ve onay", "gruplar": "Alıcı grupları",
+    "parola-linki": "Oturum ve giriş", "menu": "Menü", "raporlar": "Raporlar", "gruplar": "Alıcı grupları",
     "kaynaklar": "Kaynaklar", "kaynak-tipleri": "Kaynaklar", "konular": "Konular", "tarama": "Tarama",
     "zamanlama": "Tarama", "kullanicilar": "Kullanıcılar", "denetim": "Denetim kaydı", "ayarlar": "Ayarlar",
     "api-anahtarlari": "API anahtarları",
@@ -130,6 +147,7 @@ class Isletim:
     panel_adresi: str | None
     pasif_silme_gun: int
     dokuman_acik: bool
+    api_imza: bool = False
 
     # SMTP ayarsızsa mailler sadece dosyaya yazılır, panel bunu "gönderildi" diye göstermemeli.
     @property
@@ -341,6 +359,7 @@ def uygulama_olustur(
     panel_adresi: str | None = None,  # davet/sıfırlama maillerindeki link (MEVZUAT_PANEL_ADRESI)
     pasif_silme_gun: int = guvenlik.PASIF_SILME_GUN,  # sadece ekranda gösterilir, silmeyi günlük iş yapar
     dokuman_acik: bool = False,  # API dokümanı anahtarsız açılsın mı (sunucuda varsayılan açık, MEVZUAT_DOKUMAN_ACIK)
+    api_imza: bool = False,  # dış sistem istekleri imzalı olmalı mı (sunucuda varsayılan açık, MEVZUAT_API_IMZA)
     ayar_oku: Callable[[Session], dict] | None = None,  # verilirse yukarıdaki ayarlar her istekte buradan okunur
 ) -> FastAPI:
     # Gizli anahtar kısaysa çalışma (çerez imzası tahmin edilebilir olur).
@@ -364,14 +383,14 @@ def uygulama_olustur(
     # Veritabanı oturumu üreten fabrika.
     Oturum = sessionmaker(engine)
     # O anki ayarlar. Sunucuda panelden değişen ayarlar her istekte okunur (ayar_oku), testlerde verilen değerler sabittir.
-    sabit = Isletim(gonderici, ek_ekle, mfa_zorunlu, panel_adresi, pasif_silme_gun, dokuman_acik)
+    sabit = Isletim(gonderici, ek_ekle, mfa_zorunlu, panel_adresi, pasif_silme_gun, dokuman_acik, api_imza)
 
     def ayar(db: Session) -> Isletim:
         if ayar_oku is None:
             return sabit
         a = ayar_oku(db)
         return Isletim(panel_ayarlari.gonderici(a), a["ek_ekle"], a["mfa_zorunlu"], a["panel_adresi"], a["pasif_silme_gun"],
-                       a["dokuman_acik"])
+                       a["dokuman_acik"], a["api_imza"])
 
     # Her cevaba güvenlik başlıklarını ekleyen ara katman.
     @app.middleware("http")
@@ -397,10 +416,17 @@ def uygulama_olustur(
     def csrf_dogrula(request: Request) -> None:
         """Veri değiştiren her API isteğinde (giriş dahil) X-CSRF-Token başlığı oturumdaki token'la aynı olmalı.
         Başka bir site kullanıcının tarayıcısından istek gönderse bile bu başlığı koyamaz."""
+        # Adres tarayıcıda yeni sekmede açılırsa (adres çubuğu, link) reddedilir, giriş yapmış olsa da.
+        # Panel ve dış sistemler adresleri sayfanın içinden çağırır, doküman sayfası ve indirme bunun dışında.
+        if request.headers.get("sec-fetch-mode") == "navigate" and request.url.path not in TARAYICIDA_ACILANLAR:
+            raise HTTPException(401, "Bu adres tarayıcıda doğrudan açılamaz.")
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return
         # API anahtarıyla gelen istek çerezle değil anahtarla tanınır. Başka bir site tarayıcıdan bu başlığı koyamaz.
         if istek_anahtari(request):
+            return
+        # İmzalı istek de çerezle tanınmaz, imzası /api/v1 adreslerinde ayrıca doğrulanır.
+        if imza.imzali_mi(request.headers) and request.url.path.startswith(SURUMLU_ON_EK):
             return
         beklenen = request.session.get("csrf")
         gelen = request.headers.get("x-csrf-token", "")
@@ -427,9 +453,21 @@ def uygulama_olustur(
 
     # Giriş yapılmamışsa 401 hatası ver. API anahtarı gönderildiyse çerez değil anahtar geçerlidir.
     def giris_gerekli(request: Request, db: Session) -> Kullanici:
+        # İmzası doğrulanmış istek (imza_kontrol), hesabı anahtarın hesabıdır.
+        hesap_id = getattr(request.state, "imzali_hesap", None)
+        if hesap_id is not None:
+            return db.get(Kullanici, hesap_id)
         anahtar = istek_anahtari(request)
         if anahtar is not None:
+            if ayar(db).api_imza:
+                denetle(db, "api_imzasiz_istek", None, ip(request), yol=request.url.path, on_ek=anahtar.strip()[:10])
+                db.commit()
+                raise HTTPException(401, "API anahtarı doğrudan gönderilemez, istek anahtarla imzalanmalı (HMAC). "
+                                         "Nasıl imzalanacağı API dokümanındaki Authorize penceresinde.")
             return api_anahtari_gerekli(request, db, anahtar)
+        # İmza zorunluyken /api/v1 adresleri panel oturumuyla da açılmaz, sadece imzalı istekle.
+        if request.url.path.startswith(SURUMLU_ON_EK) and ayar(db).api_imza:
+            raise HTTPException(401, "Bu adres imzalı istek ister (X-Anahtar, X-Zaman, X-Numara, X-Imza).")
         kullanici = oturum_kullanicisi(request, db)
         if kullanici is None:
             raise HTTPException(401, "Giriş yapmanız gerekiyor.")
@@ -437,6 +475,39 @@ def uygulama_olustur(
         if kullanici.rol == API_ROLU and request.url.path not in API_ROLU_ADRESLERI:
             raise HTTPException(403, "API kullanıcısı bu adrese oturumla erişemez, API anahtarı gönderin.")
         return kullanici
+
+    # İmzalı isteği doğrular, hesabı request.state'e koyar. İmza yoksa bir şey yapmaz, giris_gerekli karar verir.
+    # Gövde burada okunur, imza gövdeyi de kapsar. Veritabanı işi ayrı iş parçacığında, sunucu beklemesin.
+    async def imza_kontrol(request: Request) -> None:
+        if not imza.imzali_mi(request.headers):
+            return
+        govde = await request.body()
+        adres = request.scope.get("raw_path", request.url.path.encode()).decode("latin-1")
+        sorgu = request.scope.get("query_string", b"").decode("latin-1")
+
+        def dogrula() -> int:
+            with Oturum() as db:
+                try:
+                    kayit, hesap = imza.dogrula(db, request.headers, request.method, adres, sorgu, govde, gizli_anahtar)
+                except imza.ImzaHatasi as e:
+                    db.rollback()
+                    denetle(db, "api_imza_gecersiz", None, ip(request), yol=request.url.path, sebep=e.sebep,
+                            on_ek=request.headers.get(imza.ANAHTAR_BASLIGI, "")[:10])
+                    db.commit()
+                    raise HTTPException(e.kod, e.mesaj) from None
+                simdi = datetime.now()
+                if kayit.son_kullanim is None or (simdi - kayit.son_kullanim).total_seconds() > SON_KULLANIM_ARALIGI:
+                    kayit.son_kullanim = simdi
+                denetle(db, "api_istegi", hesap.id, ip(request), anahtar_id=kayit.id, yontem=request.method,
+                        yol=request.url.path)
+                db.commit()
+                return hesap.id
+
+        request.state.imzali_hesap = await run_in_threadpool(dogrula)
+
+    # Dış sistemden mi geldi, API anahtarıyla ya da imzayla.
+    def anahtarla_mi(request: Request) -> bool:
+        return istek_anahtari(request) is not None or getattr(request.state, "imzali_hesap", None) is not None
 
     # API anahtarının hesabı. Geçersizse 401. Her istek denetim kaydına yazılır.
     def api_anahtari_gerekli(request: Request, db: Session, anahtar: str) -> Kullanici:
@@ -482,7 +553,7 @@ def uygulama_olustur(
         csrf(request)
 
     # API anahtarının iki biçimi dokümanda "Authorize" düğmesi olarak görünür, kontrolü giris_gerekli yapar.
-    anahtar_semalari = [Security(HTTPBearer(auto_error=False, description="API anahtarı: Authorization: Bearer mvz_..."))]
+    anahtar_semalari = [Security(HTTPBearer(auto_error=False, description=IMZA_ACIKLAMASI))]
     # Bütün /api adreslerinin grubu, her istekte önce CSRF kontrolü çalışır.
     api = APIRouter(prefix="/api", dependencies=[Depends(csrf_dogrula), *anahtar_semalari])
 
@@ -1307,7 +1378,8 @@ def uygulama_olustur(
         with Oturum() as db:
             yapan = anahtar_yoneticisi(request, db, "api_anahtari_uret")
             try:
-                kayit, anahtar = guvenlik.api_anahtari_uret(db, istek.ad, istek.rol, istek.gun, yapan, ip(request))
+                kayit, anahtar = guvenlik.api_anahtari_uret(db, istek.ad, istek.rol, istek.gun, yapan, ip(request),
+                                                            gizli_anahtar=gizli_anahtar)
             except ValueError as e:
                 raise HTTPException(400, str(e))
             db.commit()
@@ -1349,8 +1421,9 @@ def uygulama_olustur(
     # İndirilen dokümana panel adresi sunucu adresi olarak yazılır (Postman ve bilgisayardan açılan HTML istekleri oraya atar).
     # Sayfadaki doküman zaten bu sunucudan açıldığı için adres yazılmaz, istekler sayfanın adresine gider.
     def openapi_semasi(db: Session, sunucu_adresli: bool = False) -> dict:
-        sema = get_openapi(title="Mevzuat Takip API", version="1.0",
-                           routes=[*portal_yolu.routes, *api.routes], tags=panel_belgesi.ETIKETLER)
+        # Dokümanda sadece dış sistemlerin adresleri (/api/v1) var, panelin kendi adresleri yok.
+        sema = get_openapi(title="Mevzuat Takip API", version="1.0", routes=portal_yolu.routes,
+                           tags=panel_belgesi.ETIKETLER)
         adres = ayar(db).panel_adresi
         if adres and sunucu_adresli:
             sema["servers"] = [{"url": adres, "description": "Mevzuat Takip"}]
@@ -1362,10 +1435,10 @@ def uygulama_olustur(
         if ayar(db).dokuman_acik:
             return
         kullanici = giris_gerekli(request, db)
-        if istek_anahtari(request) is None and kullanici.rol not in DOKUMAN_ROLLERI:
+        if not anahtarla_mi(request) and kullanici.rol not in DOKUMAN_ROLLERI:
             raise HTTPException(403, "API dokümanına erişim yetkiniz yok.")
 
-    @api.get("/dokuman/openapi.json", include_in_schema=False)
+    @api.get("/dokuman/openapi.json", include_in_schema=False, dependencies=[Depends(imza_kontrol)])
     def openapi_tanimi(request: Request):
         with Oturum() as db:
             dokuman_gerekli(request, db)
@@ -1378,7 +1451,7 @@ def uygulama_olustur(
         return HTMLResponse(SWAGGER_SAYFASI)
 
     # Dokümanı dosya olarak verir. html, internet ve giriş gerektirmeden açılan tek dosya. json, Postman gibi araçlara yüklenir.
-    @api.get("/dokuman/indir", include_in_schema=False)
+    @api.get("/dokuman/indir", include_in_schema=False, dependencies=[Depends(imza_kontrol)])
     def api_dokumani_indir(request: Request, bicim: Literal["html", "json"] = "html"):
         with Oturum() as db:
             dokuman_gerekli(request, db)
@@ -1394,7 +1467,8 @@ def uygulama_olustur(
 
     # Sürümlü adresler (/api/v1), portal bunları kullanır. Mevzuat okuma kendi fonksiyonlarıyla, onay, tarama, kaynak,
     # konu ve alıcı grubu panelin aynı fonksiyonlarıyla ama sabit cevap biçimiyle (web/portal.py).
-    portal_yolu = portal.portal_api(Oturum, giris_gerekli, [Depends(csrf_dogrula), *anahtar_semalari])
+    portal_yolu = portal.portal_api(Oturum, giris_gerekli, [Depends(csrf_dogrula), Depends(imza_kontrol),
+                                                             *anahtar_semalari])
     surumlu = portal.yazma_adreslerini_ekle(portal_yolu, api.routes, panel_belgesi.BELGE, API_GRUPLARI)
     # Her uç noktanın başlığı, açıklaması, yetkisi ve hata cevapları (web/panel_belgesi.py). v1'e açılan panel adresleri
     # dokümanda tekrar görünmez, panel onları kullanmaya devam eder.

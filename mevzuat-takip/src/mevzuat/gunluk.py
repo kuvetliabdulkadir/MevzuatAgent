@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mevzuat import pipeline, rapor, saklama, zamanlama
-from mevzuat.db import Calisma, KaynakDurumu, Kayit, Kullanici, Rapor
+from mevzuat.db import Calisma, KaynakDurumu, KaynakTanimi, Kayit, Kullanici, Rapor
 from mevzuat.filtre import Konu
 from mevzuat.mail import Mail, MailGonderici
 from mevzuat.sources.base import Kaynak
@@ -129,15 +129,21 @@ def _nabiz_mail(session: Session, simdi: datetime, alicilar: list[str]) -> Mail:
     raporlar = session.scalar(
         select(func.count()).select_from(Rapor).where(Rapor.gonderildi.is_not(None), Rapor.gonderildi >= baslangic)
     )
-    # Her kaynağın durumu.
-    kaynaklar = session.scalars(select(KaynakDurumu).order_by(KaynakDurumu.kaynak)).all()
-    # Mail satırları. * ile kaynak satırları listeye açılıyor.
+    # Her kaynağın durumu. Panelden silinen kaynağın checkpoint'i kayıtta kalır, mailde görünmesin.
+    kaynaklar = session.execute(
+        select(KaynakDurumu, KaynakTanimi.aktif)
+        .outerjoin(KaynakTanimi, KaynakTanimi.ad == KaynakDurumu.kaynak)
+        .where(KaynakTanimi.kaldirildi.is_not(True))
+        .order_by(KaynakDurumu.kaynak)
+    ).all()
+    # Mail satırları. * ile kaynak satırları listeye açılıyor. Durdurulan kaynak ilerlemez, bu yüzden yanına yazılır.
     satirlar = [
         "Mevzuat Takip sistemi çalışıyor. Son 7 günün özeti:",
         f"Çalışma: {len(calismalar)} (başarılı: {basarili})",
         f"Taranan yeni kayıt: {yeni}, ilgili bulunan: {ilgili}, gönderilen rapor: {raporlar}",
-        *[f"Kaynak '{k.kaynak}': son ilerleme {k.guncellendi:%d.%m.%Y %H:%M} (checkpoint {k.checkpoint})"
-          for k in kaynaklar],
+        *[f"Kaynak '{k.kaynak}'{' (durduruldu)' if aktif is False else ''}: son ilerleme "
+          f"{k.guncellendi:%d.%m.%Y %H:%M} (checkpoint {k.checkpoint})"
+          for k, aktif in kaynaklar],
         "Bu mail her hafta gelir. Gelmediyse sistem durmuş olabilir; kontrol edin.",
     ]
     return _basit_mail(f"Mevzuat Takip — haftalık durum ({simdi:%d.%m.%Y})", satirlar, alicilar)

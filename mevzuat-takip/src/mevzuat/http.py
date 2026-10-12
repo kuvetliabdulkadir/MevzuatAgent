@@ -22,7 +22,6 @@ USER_AGENT = "MevzuatTakip/0.1"
 # Geçici sayılan durumlar, kaynak bir an düştü/yoğun. 404, 403, 400 kalıcıdır, denemek boşuna yük.
 # 429 çok istek attın demek, 500, 502, 503 ve 504 ise sunucu tarafında geçici sorun demek.
 TEKRAR_KODLARI = {429, 500, 502, 503, 504}
-TEKRAR_HATALARI = (httpx.TransportError,)  # bağlantı, zaman aşımı, protokol hataları
 # Sadece okuma istekleri tekrarlanır. Okuma amaçlı POST (ör. GİB listesi) isteğe
 # extensions={TEKRAR_DENENEBILIR, True} koyarak izin verir.
 TEKRAR_DENENEBILIR = "tekrar_denenebilir"
@@ -73,6 +72,15 @@ class GuvensizAdres(httpx.HTTPError):
     """İç ağ / özel IP'ye bağlanma girişimi (SSRF)."""
 
 
+# Alan adı IP'ye çevrilemedi. Genelde DNS'teki anlık aksamadır, bu yüzden tekrar denenir.
+class CozumlenemeyenAdres(GuvensizAdres):
+    """Alan adı çözümlenemedi (DNS hatası ya da boş cevap)."""
+
+
+# Tekrar denenen hatalar, bağlantı, zaman aşımı, protokol hataları ve DNS'in bir an adresi bulamaması.
+TEKRAR_HATALARI = (httpx.TransportError, CozumlenemeyenAdres)
+
+
 # Bu IP genel internette mi diye bakar. İç ağ, kendi bilgisayarı ve bulut meta verisi gibi adreslerde False döner.
 def ip_disa_acik_mi(ip: str) -> bool:
     """IP genel internette mi (iç ağ, loopback, link-local, bulut meta verisi, operatör NAT'ı değil)."""
@@ -97,7 +105,7 @@ def dns_coz(host: str) -> list[str]:
     try:
         return sorted({b[4][0] for b in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)})
     except socket.gaierror as e:
-        raise GuvensizAdres(f"Adres çözümlenemedi: {host}") from e
+        raise CozumlenemeyenAdres(f"Adres çözümlenemedi: {host}") from e
 
 
 # SSRF koruması, her bağlantıdan önce adresi çözer, iç ağ değilse o IP'ye bağlanır.
@@ -124,7 +132,7 @@ class SsrfKoruyanTransport(httpx.BaseTransport):
         except ValueError:
             ipler = self.cozumle(host)
         if not ipler:
-            raise GuvensizAdres(f"Adres çözümlenemedi: {host}")
+            raise CozumlenemeyenAdres(f"Adres çözümlenemedi: {host}")
         # IP'lerden biri bile iç ağdaysa bağlanma.
         for ip in ipler:
             if not ip_disa_acik_mi(ip):

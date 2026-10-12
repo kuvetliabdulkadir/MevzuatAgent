@@ -71,6 +71,9 @@ ALANLAR: tuple[Alan, ...] = (
     Alan("dokuman_acik", "MEVZUAT_DOKUMAN_ACIK", "evet_hayir", "Güvenlik", "API dokümanı herkese açık",
          "Açıksa /api/dokuman (Swagger) anahtarsız açılır, içinde veri yok, sadece adresler ve açıklamalar var. "
          "İstekler yine API anahtarı ister. Kapalıysa doküman da anahtar ya da panel girişi ister.", True),
+    Alan("api_imza", "MEVZUAT_API_IMZA", "evet_hayir", "Güvenlik", "API istekleri imzalı olmalı",
+         "Açıksa dış sistemler her isteği API anahtarıyla imzalar (HMAC), anahtarın kendisi gönderilmez ve kopyalanan "
+         "istek reddedilir. Kapatmak sadece deneme içindir, o zaman anahtar Authorization: Bearer ile gönderilir.", True),
     Alan("saklama_gun", "MEVZUAT_SAKLAMA_GUN", "sayi", "Saklama", "Rapor ve denetim saklama süresi (gün)",
          "Bitmiş raporlar ve denetim kaydı bu kadar gün sonra silinir. 0 ise silinmez.", 30, 0, 3650),
     Alan("pasif_silme_gun", "MEVZUAT_PASIF_SILME_GUN", "sayi", "Saklama", "Pasif hesap silme süresi (gün)",

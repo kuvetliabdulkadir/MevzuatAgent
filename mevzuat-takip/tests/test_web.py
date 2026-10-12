@@ -473,11 +473,14 @@ def test_api_dokumani_giris_ister_ve_csp_ile_uyumlu(migrasyonlu):
     _giris(client, eposta="admin@firma.com")
     assert "script-src 'self'" in sayfa.headers["content-security-policy"]
     assert "<script>" not in sayfa.text  # satır içi script yok, CSP engellemez
-    # Tek doküman: mevzuat arama (/api/v1) ve panelin bütün işlemleri birlikte, tek kimlik doğrulama biçimi (Bearer).
+    # Tek doküman, sadece dış sistemlerin adresleri (/api/v1). Panelin bütün işlemleri v1 altında da var.
     sema = client.get("/api/dokuman/openapi.json").json()
     assert sema["info"]["title"] == "Mevzuat Takip API"
     assert {"/api/v1/mevzuat", "/api/v1/mevzuat/{kayit_id}", "/api/v1/konular", "/api/v1/raporlar"} <= set(sema["paths"])
-    assert "/api/v1/raporlar/{rapor_id}/ek-gonderim" in sema["paths"] and "/api/menu" in sema["paths"]
+    assert all(yol.startswith("/api/v1/") for yol in sema["paths"])
+    v1 = {"/api/v1/raporlar/{rapor_id}/ek-gonderim", "/api/v1/kullanicilar", "/api/v1/ayarlar", "/api/v1/denetim",
+          "/api/v1/kaynaklar/{ad}/geri-al", "/api/v1/konular/{konu_id}/gecmis", "/api/v1/ayarlar/mail-dene"}
+    assert v1 <= set(sema["paths"])
     assert list(sema["components"]["securitySchemes"]) == ["HTTPBearer"]
     # Panelin kendi girişi, anahtar yönetimi ve tekrar eden rapor okuma dokümanda yok, adresler yine çalışır.
     gizli = ("/api/giris", "/api/oturum", "/api/parolam", "/api/api-anahtarlari", "/api/raporlar", "/api/raporlar/{rapor_id}")
@@ -486,7 +489,8 @@ def test_api_dokumani_giris_ister_ve_csp_ile_uyumlu(migrasyonlu):
     assert "/api/gruplar" not in sema["paths"] and "/api/raporlar/{rapor_id}/karar" not in sema["paths"]
     gruplar_cevabi = sema["paths"]["/api/v1/gruplar"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert gruplar_cevabi == {"$ref": "#/components/schemas/GrupListesi"}
-    assert [e["name"] for e in sema["tags"]][:2] == ["Mevzuat", "Kategoriler"]
+    assert [e["name"] for e in sema["tags"]] == ["Mevzuat", "Raporlar", "Konular", "Kaynaklar", "Alıcı grupları", "Tarama",
+                                                 "Kullanıcılar", "Ayarlar", "Denetim kaydı"]
     # Her panel uç noktası belgeli: Türkçe başlık, yetki satırı, hata cevapları.
     for yol, islemler in sema["paths"].items():
         for yontem, islem in islemler.items():
@@ -497,7 +501,7 @@ def test_api_dokumani_giris_ister_ve_csp_ile_uyumlu(migrasyonlu):
     # Arayüz dosyaları, sağlık ve doküman adresleri dokümanda yok, her uç nokta bir grupta.
     assert not any(p in sema["paths"] for p in ("/{yol}", "/saglik", "/api/dokuman", "/api/{yol}"))
     gruplar = {etiket for yol in sema["paths"].values() for islem in yol.values() for etiket in islem["tags"]}
-    assert "Diğer" not in gruplar and {"Raporlar ve onay", "Kaynaklar", "Menü"} <= gruplar
+    assert gruplar == {e["name"] for e in sema["tags"]}
 
 
 def test_dokuman_indirilir_html_internetsiz_json_sunucu_adresli(migrasyonlu, arayuz):

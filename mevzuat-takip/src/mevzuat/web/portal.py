@@ -1,6 +1,6 @@
 """Sürümlü adresler (/api/v1). Dış sistemlerin (şirket portalı vb.) mevzuatı okuduğu, raporu onayladığı, taramayı,
 kaynakları, konuları ve alıcı gruplarını yönettiği adresler. Alanlar değişirse yeni sürüm (/api/v2) açılır, v1 bozulmaz.
-Kimlik doğrulama her istekte API anahtarıyla yapılır (Authorization: Bearer).
+Her istek API anahtarıyla imzalanır (HMAC, web/imza.py), anahtarın kendisi gönderilmez.
 """
 
 from collections.abc import Callable
@@ -263,8 +263,94 @@ class TaramaDurumu(BaseModel):
     zamanlama: Zamanlama
 
 
+class KullaniciSatiri(BaseModel):
+    id: int = Field(examples=[1])
+    ad: str = Field(examples=["Ayşe Onaylayıcı"])
+    eposta: str = Field(examples=["onay@firma.com.tr"])
+    rol: str = Field(description="admin ya da onaylayici", examples=["onaylayici"])
+    aktif: bool = Field(examples=[True])
+    son_giris: str | None = Field(examples=["2026-10-08T14:24"])
+    olusturuldu: str | None = Field(examples=["2026-10-01T10:00"])
+    silinecek: str | None = Field(description="Pasif hesabın kişisel bilgilerinin silineceği gün", examples=[None])
+    kilitli: bool = Field(description="Art arda hatalı girişten geçici kilitli", examples=[False])
+    davet_bekliyor: bool = Field(description="Davet gitti, kişi henüz parolasını belirlemedi", examples=[False])
+
+
+class KullaniciListesi(BaseModel):
+    kullanicilar: list[KullaniciSatiri]
+    panel_adresi_var: bool = Field(description="false ise davet ve parola linkleri gönderilemez")
+    pasif_silme_gun: int = Field(examples=[30])
+
+
+class KullaniciIslemi(BaseModel):
+    mesaj: Mesaj | None = Field(None, description="Davet ya da link mailinin sonucu")
+    kullanicilar: list[KullaniciSatiri] = Field(description="Güncel liste")
+
+
+class KisiAdi(BaseModel):
+    id: int
+    ad: str
+
+
+class DenetimSatiri(BaseModel):
+    id: int = Field(examples=[82])
+    zaman: str | None = Field(examples=["2026-10-08T16:14"])
+    kullanici_id: int | None = Field(examples=[13])
+    kullanici: str | None = Field(examples=["API: Portal"])
+    islem: str = Field(examples=["api_istegi"])
+    detay: dict = Field(examples=[{"yol": "/api/v1/mevzuat", "yontem": "GET"}])
+    ip: str | None = Field(examples=["10.0.0.12"])
+
+
+class DenetimListesi(BaseModel):
+    kayitlar: list[DenetimSatiri] = Field(description="En yeni 100 kayıt")
+    islemler: list[str] = Field(description="Süzgeçte kullanılabilecek işlem adları")
+    kullanicilar: list[KisiAdi] = Field(description="Süzgeçte kullanılabilecek kişiler")
+
+
+class AyarAlani(BaseModel):
+    ad: str = Field(examples=["smtp_host"])
+    grup: str = Field(examples=["Mail sunucusu"])
+    etiket: str = Field(examples=["SMTP sunucusu"])
+    aciklama: str
+    tur: str = Field(description="metin, sayi, evet_hayir, adres, adresler ya da sifre", examples=["metin"])
+    en_az: int | None = None
+    en_cok: int | None = None
+    kaynak: str = Field(description="Değerin geldiği yer, panel, .env ya da varsayilan", examples=[".env"])
+    deger: Any = Field(None, description="Şifre alanında her zaman null", examples=["smtp.gmail.com"])
+    dolu: bool | None = Field(None, description="Sadece şifre alanında, şifre girilmiş mi")
+    cozulemedi: bool | None = Field(None, description="Sadece şifre alanında, kayıtlı şifre çözülemedi mi")
+
+
+class Ayarlar(BaseModel):
+    alanlar: list[AyarAlani]
+    surum: int = Field(description="Kaydederken gönderilir, ayarlar bu arada değiştiyse 409 döner", examples=[3])
+    mesaj: Mesaj | None = Field(None, description="Sadece kaydetme cevabında")
+
+
+class Fark(BaseModel):
+    alan: str = Field(examples=["kelimeler"])
+    once: Any = Field(examples=[["altın"]])
+    sonra: Any = Field(examples=[["altın", "kuyum"]])
+
+
+class GecmisSatiri(BaseModel):
+    id: int = Field(description="Geri almada gönderilen denetim_id", examples=[57])
+    zaman: str = Field(examples=["2026-10-08T14:18"])
+    islem: str = Field(examples=["konu_duzenle"])
+    islem_adi: str = Field(examples=["Düzenlendi"])
+    kim: str = Field(examples=["Ayşe Onaylayıcı"])
+    farklar: list[Fark]
+    geri_alinabilir: bool
+    geri_alinan: int | None = Field(description="Bu satır bir geri almaysa geri alınan kaydın numarası")
+
+
+class Gecmis(BaseModel):
+    gecmis: list[GecmisSatiri] = Field(description="Yeniden eskiye")
+
+
 HATALAR = {
-    401: {"model": Hata, "description": "Anahtar yok, geçersiz, süresi dolmuş ya da iptal edilmiş"},
+    401: {"model": Hata, "description": "İmza yok ya da tutmuyor, istek daha önce kullanılmış, anahtar geçersiz"},
     403: {"model": Hata, "description": "Anahtarın yetkisi yok"},
 }
 BULUNAMADI = {404: {"model": Hata, "description": "Kayıt yok"}}
@@ -365,7 +451,7 @@ def portal_api(oturum: Callable[[], Session], giris_gerekli: Callable, guvenlik_
                     "ozet_tablosu": kalem.ozet_tablosu, "yururluk": kalem.yururluk, "one_cikanlar": kalem.one_cikanlar,
                     "metin": k.icerik, "metin_durumu": k.icerik_durumu, "degisiklikler": k.degisiklikler}
 
-    @api.get("/konular", response_model=list[Konu], dependencies=[Depends(kimlik)], tags=["Kategoriler"],
+    @api.get("/konular", response_model=list[Konu], dependencies=[Depends(kimlik)], tags=["Konular"],
              summary="Konular (kategoriler)")
     def konular(pasifler: bool = Query(False, description="true verilirse pasif konular da gelir")):
         """Mevzuatın süzüldüğü konular. Bir kayıt bir ya da birden çok konuya uyar, /mevzuat?konu= ile süzülür."""
@@ -377,7 +463,7 @@ def portal_api(oturum: Callable[[], Session], giris_gerekli: Callable, guvenlik_
                      "kelimeler": k.kelimeler, "haric": k.haric, "dislanan": k.dislanan, "aktif": k.aktif,
                      "surum": k.surum} for k in db.scalars(sorgu)]
 
-    @api.get("/kaynaklar", response_model=list[Kaynak], dependencies=[Depends(kimlik)], tags=["Kategoriler"],
+    @api.get("/kaynaklar", response_model=list[Kaynak], dependencies=[Depends(kimlik)], tags=["Kaynaklar"],
              summary="Taranan kaynaklar")
     def kaynaklar(kaldirilanlar: bool = Query(False, description="true verilirse kaldırılan kaynaklar da gelir")):
         """Mevzuatın toplandığı kaynaklar (Resmî Gazete, MASAK, GİB ...). /mevzuat?kaynak= ile süzülür."""
@@ -451,6 +537,18 @@ YAZMA_ADRESLERI: dict[tuple[str, str], type[BaseModel]] = {
     ("PUT", "/api/zamanlama"): Zamanlama,
     ("GET", "/api/tarama/durum"): TaramaDurumu,
     ("POST", "/api/tarama"): TaramaDurumu,
+    ("GET", "/api/kaynaklar/{ad}/gecmis"): Gecmis,
+    ("POST", "/api/kaynaklar/{ad}/geri-al"): Kaynak,
+    ("GET", "/api/konular/{konu_id}/gecmis"): Gecmis,
+    ("POST", "/api/konular/{konu_id}/geri-al"): Konu,
+    ("GET", "/api/kullanicilar"): KullaniciListesi,
+    ("POST", "/api/kullanicilar"): KullaniciIslemi,
+    ("POST", "/api/kullanicilar/{kullanici_id}/parola-linki"): KullaniciIslemi,
+    ("POST", "/api/kullanicilar/{kullanici_id}/aktiflik"): KullaniciIslemi,
+    ("GET", "/api/denetim"): DenetimListesi,
+    ("GET", "/api/ayarlar"): Ayarlar,
+    ("PUT", "/api/ayarlar"): Ayarlar,
+    ("POST", "/api/ayarlar/mail-dene"): Mesaj,
 }
 
 

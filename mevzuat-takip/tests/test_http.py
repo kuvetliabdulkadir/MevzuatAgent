@@ -238,3 +238,28 @@ def test_varsayilan_istemcide_de_sinir_var_post_dahil():
     with make_client(transport=httpx.MockTransport(lambda r: httpx.Response(200, content=_parcali(30))),
                      en_fazla_bayt=1_000_000) as c, pytest.raises(BoyutAsildi):
         c.post("https://ornek.test/liste", json={})  # tekrar denenmeyen POST yolu da sınırlı
+
+
+def test_dns_anlik_bulamazsa_tekrar_denenir_ic_ag_denenmez():
+    from mevzuat.http import CozumlenemeyenAdres, TekrarDeneyenTransport
+
+    ic, kayit = _yakalayan()
+    cagri = []
+
+    def bir_kez_bulamayan(host):
+        cagri.append(host)
+        if len(cagri) == 1:
+            raise CozumlenemeyenAdres(f"Adres çözümlenemedi: {host}")
+        return ["93.184.216.34"]
+
+    tr = TekrarDeneyenTransport(SsrfKoruyanTransport(ic, cozumle=bir_kez_bulamayan), uyu=lambda s: None)
+    with httpx.Client(transport=tr) as c:
+        assert c.get("https://www.mevzuat.gov.tr/").status_code == 200
+    assert len(cagri) == 2 and kayit["host"] == "93.184.216.34"
+
+    cagri.clear()
+    tr = TekrarDeneyenTransport(SsrfKoruyanTransport(ic, cozumle=lambda h: cagri.append(h) or ["10.0.0.5"]),
+                                uyu=lambda s: None)
+    with httpx.Client(transport=tr) as c, pytest.raises(GuvensizAdres, match="İç ağ"):
+        c.get("https://ic.firma.local/")
+    assert len(cagri) == 1

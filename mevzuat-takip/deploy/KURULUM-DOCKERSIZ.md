@@ -189,9 +189,8 @@ konur:
 | `https://mevzuat.firma.com.tr/` | Panel: onaylayıcı ve admin |
 | `https://mevzuat.firma.com.tr/api/dokuman` | API dokümanı (Swagger). Doğrudan açılır, panel hesabı gerekmez. İstek denemek için sağ üstteki **Authorize**'a API anahtarı girilir. `MEVZUAT_DOKUMAN_ACIK=0` ise doküman da anahtar ister |
 
-Dokümanda sistemin bütün işlemleri var: mevzuat arama ve detayı (sürümlü, `/api/v1`), rapor onayı ve gönderimi,
-tarama, kaynak, konu, alıcı grubu, ayarlar. Portal bizim arayüz yerine bunları kullanabilir.
-Anahtar her istekte `Authorization: Bearer mvz_...` biçiminde gönderilir.
+Dokümanda sistemin bütün işlemleri `/api/v1` altında: mevzuat, raporlar ve onay, konular, kaynaklar, alıcı grupları,
+tarama, kullanıcılar, ayarlar, denetim kaydı. Portal bizim arayüz yerine bunları kullanabilir.
 
 API anahtarlarını admin panelde **API Anahtarları** sayfasından üretir ve iptal eder. Panel kullanılmıyorsa sunucudan:
 
@@ -201,9 +200,19 @@ $M api-anahtari-listele
 $M api-anahtari-iptal --id 3
 ```
 
-Anahtar seçilen rolün (admin ya da onaylayıcı) panelde yapabildiği her şeyi API'den yapar, panel hiç kullanılmasa da. Dış sistem anahtarı her istekte
-`Authorization: Bearer mvz_...` biçiminde gönderir. Doküman aynı sayfadan HTML (internetsiz açılır) ya da OpenAPI JSON (Postman'e
-yüklenir) olarak da indirilir.
+Anahtar seçilen rolün (tam yetki, admin ya da onaylayıcı) yapabildiği her şeyi API'den yapar, panel hiç kullanılmasa da.
+Doküman aynı sayfadan HTML (internetsiz açılır) ya da OpenAPI JSON (Postman'e yüklenir) olarak da indirilir.
+
+**İstekler imzalı gelir.** Dış sistem anahtarı hiç göndermez, her isteği anahtarla imzalar (HMAC-SHA256). Nasıl imzalanacağı
+dokümandaki Authorize penceresinde, hazır kod [`imza-ornekleri/`](imza-ornekleri) klasöründe (Python, Node.js, C#, Java).
+Kopyalanan istek, değiştirilen istek ve 5 dakikadan eski istek reddedilir. Bunun için portal ekibine iletilecek kurallar:
+- İmza **portalın sunucusunda** atılır, anahtar orada gizli ayar olarak saklanır. Tarayıcıdaki koda konmaz, konursa F12'den okunur.
+- İki sunucunun saati doğru olmalı (NTP). 5 dakikadan fazla kayma isteği reddettirir.
+- Aradaki ters vekil adresi ve sorguyu değiştirmemeli (ör. `/mevzuat/api/...` → `/api/...` çevirisi). İmza, panelin gördüğü
+  adres üzerinden kontrol edilir.
+- API adresleri tarayıcıda yeni sekmede açılmaz, bu bilinçli.
+
+Anahtar sızdıysa panelden iptal edilir, yenisi üretilir. `MEVZUAT_API_IMZA=0` imzayı kapatır, sadece deneme içindir.
 
 İki sınır var. Bilgi işlem farklı bir şey isterse kod tarafında eklenir:
 - Panel bir **alt yol** altında (ör. `portal.firma.com/mevzuat/`) çalışmaz, kendi alt alanını (ör. `mevzuat.firma.com.tr`) ister.

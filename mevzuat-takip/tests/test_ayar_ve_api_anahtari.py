@@ -29,6 +29,8 @@ class Posta:
 def ortam(tmp_path, monkeypatch):
     for alan in panel_ayarlari.ALANLAR:
         monkeypatch.delenv(alan.degisken, raising=False)
+    # Bu dosya anahtarın rol ve iptal kurallarını doğrudan anahtarla dener, imzalı istek test_imza.py'de.
+    monkeypatch.setenv("MEVZUAT_API_IMZA", "0")
     engine = create_engine(f"sqlite:///{tmp_path / 'a.db'}")
     migrate(engine)
     with Session(engine) as s:
@@ -288,6 +290,7 @@ def test_anahtar_komut_satirindan_uretilir_listelenir_iptal_edilir(tmp_path, mon
 
     url = f"sqlite:///{tmp_path / 'k.db'}"
     monkeypatch.setenv("MEVZUAT_DB_URL", url)
+    monkeypatch.setenv("MEVZUAT_GIZLI_ANAHTAR", ANAHTAR)
     cli.api_anahtari_uret_komutu(argparse.Namespace(ad="Portal", rol="admin", gun=30))
     anahtar = capsys.readouterr().out.strip().splitlines()[-1]
     assert anahtar.startswith("mvz_")
@@ -297,6 +300,8 @@ def test_anahtar_komut_satirindan_uretilir_listelenir_iptal_edilir(tmp_path, mon
         from mevzuat.web import guvenlik
         kayit, hesap = guvenlik.api_anahtari_hesabi(s, anahtar)
         assert hesap.rol == "admin" and kayit.olusturan_id is None
+        # İmza için anahtar şifreli saklanır, düz hali veritabanında yok.
+        assert anahtar not in kayit.gizli and panel_ayarlari.coz(kayit.gizli, ANAHTAR) == anahtar
     cli.api_anahtari_listele_komutu(argparse.Namespace())
     assert "Portal" in capsys.readouterr().out and anahtar not in capsys.readouterr().out
     cli.api_anahtari_iptal_komutu(argparse.Namespace(id=kayit.id))
