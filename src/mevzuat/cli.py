@@ -225,13 +225,22 @@ def kullanici_ekle_komutu(args: argparse.Namespace) -> None:
         print(f"Eklendi: {k.eposta} ({k.rol})")
 
 
+# Paneldeki gizli anahtar. Anahtar onunla şifreli saklanır, panel imzalı isteği onunla doğrular.
+def _gizli_anahtar() -> str:
+    anahtar = os.environ.get("MEVZUAT_GIZLI_ANAHTAR", "")
+    if len(anahtar) < 32:
+        raise SystemExit("MEVZUAT_GIZLI_ANAHTAR tanımlı değil, panelle aynı .env dosyasıyla çalıştırın.")
+    return anahtar
+
+
 # "api-anahtari-uret" komutu, panel kullanılmayan kurulumda API anahtarını sunucudan üretir. Anahtar sadece burada bir kez basılır.
 def api_anahtari_uret_komutu(args: argparse.Namespace) -> None:
     engine = make_engine()
     migrate(engine)
     with Session(engine) as session:
         try:
-            kayit, anahtar = guvenlik.api_anahtari_uret(session, args.ad, args.rol, args.gun, None)
+            kayit, anahtar = guvenlik.api_anahtari_uret(session, args.ad, args.rol, args.gun, None,
+                                                        gizli_anahtar=_gizli_anahtar())
         except ValueError as e:
             raise SystemExit(str(e)) from e
         session.commit()

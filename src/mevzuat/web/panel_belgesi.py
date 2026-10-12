@@ -9,18 +9,15 @@ from fastapi.routing import APIRoute
 
 # Dokümandaki grupların sırası ve açıklamaları.
 ETIKETLER = [
-    {"name": "Mevzuat", "description": "Mevzuat arama ve detayı (/api/v1)"},
-    {"name": "Kategoriler", "description": "Konular ve kaynakların listesi (/api/v1)"},
-    {"name": "Raporlar", "description": "Raporların okunması (/api/v1)"},
-    {"name": "Raporlar ve onay", "description": "Onay, ret, ek gönderim (/api/v1)"},
-    {"name": "Tarama", "description": "Tarama saatleri ve şimdi tara (/api/v1)"},
-    {"name": "Kaynaklar", "description": "Taranan sitelerin yönetimi (/api/v1, geçmiş ve geri alma panelin)"},
-    {"name": "Konular", "description": "Başlık filtresinin konuları ve anahtar kelimeleri (/api/v1, geçmiş ve geri alma panelin)"},
-    {"name": "Alıcı grupları", "description": "Raporların kime gideceği (/api/v1)"},
-    {"name": "Ayarlar", "description": "Mail sunucusu, panel adresi, saklama süreleri (panelin, sürümsüz)"},
-    {"name": "Kullanıcılar", "description": "Panel kullanıcıları (panelin, sürümsüz)"},
-    {"name": "Denetim kaydı", "description": "Kim, ne zaman, ne yaptı (panelin, sürümsüz)"},
-    {"name": "Menü", "description": "Panel menüsü (panelin, sürümsüz)"},
+    {"name": "Mevzuat", "description": "Arama ve detay"},
+    {"name": "Raporlar", "description": "Okuma, onay, ret, ek gönderim"},
+    {"name": "Konular", "description": "Kategoriler ve anahtar kelimeler"},
+    {"name": "Kaynaklar", "description": "Taranan siteler"},
+    {"name": "Alıcı grupları", "description": "Raporların kime gideceği"},
+    {"name": "Tarama", "description": "Saatler ve şimdi tara"},
+    {"name": "Kullanıcılar", "description": "Onaylayıcı ve yönetici hesapları"},
+    {"name": "Ayarlar", "description": "Mail sunucusu, adresler, süreler"},
+    {"name": "Denetim kaydı", "description": "Kim, ne zaman, ne yaptı"},
 ]
 
 # Dokümanda gösterilmeyen, sadece panel arayüzünün kullandığı adresler. API anahtarıyla gerekmezler (giriş, iki adımlı

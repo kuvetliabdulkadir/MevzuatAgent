@@ -16,6 +16,34 @@ function oku() {
   try { return sessionStorage.getItem(SAKLAMA); } catch (e) { return null; }
 }
 
+// Bayt dizisini küçük harf hex yazıya çevirir.
+function hex(tampon) {
+  return Array.from(new Uint8Array(tampon), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// İsteği anahtarla imzalar (HMAC-SHA256), anahtarın kendisi gönderilmez. Sunucudaki web/imza.py ile aynı metin.
+async function imzala(istek, anahtar) {
+  const kodla = new TextEncoder();
+  const adres = new URL(istek.url, window.location.origin);
+  const zaman = String(Math.floor(Date.now() / 1000));
+  const numara = hex(crypto.getRandomValues(new Uint8Array(16)));
+  const govde = typeof istek.body === 'string' ? istek.body : '';
+  const govdeOzeti = hex(await crypto.subtle.digest('SHA-256', kodla.encode(govde)));
+  const metin = [(istek.method || 'GET').toUpperCase(), adres.pathname, adres.search.slice(1), zaman, numara, govdeOzeti].join('\n');
+  const hmacAnahtari = await crypto.subtle.importKey('raw', kodla.encode(anahtar), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const imza = hex(await crypto.subtle.sign('HMAC', hmacAnahtari, kodla.encode(metin)));
+  istek.headers = istek.headers || {};
+  delete istek.headers.Authorization;
+  Object.assign(istek.headers, { 'X-Anahtar': anahtar.slice(0, 10), 'X-Zaman': zaman, 'X-Numara': numara, 'X-Imza': imza });
+  return istek;
+}
+
+// Authorize'a girilen anahtar istekte "Bearer ..." olarak gelir, imzalanıp başlıktan silinir.
+function authorizeAnahtari(istek) {
+  const deger = (istek.headers && istek.headers.Authorization) || '';
+  return deger.startsWith('Bearer ') ? deger.slice(7).trim() : null;
+}
+
 function eleman(etiket, sinif, yazi) {
   const e = document.createElement(etiket);
   if (sinif) e.className = sinif;
@@ -24,8 +52,8 @@ function eleman(etiket, sinif, yazi) {
 }
 
 // Dokümanı açar. tanimIstegi sadece dokümanın kendisini (openapi.json) yüklerken uygulanır (anahtar ya da oturum).
-// "Try it out" istekleri tarayıcı çerezi taşımaz ve sadece Authorize'daki anahtarla gider: Authorize'dan çıkış yapılınca
-// istekler gerçekten 401 alır, test eden gerçek davranışı görür.
+// "Try it out" istekleri tarayıcı çerezi taşımaz ve Authorize'daki anahtarla imzalanır, anahtarın kendisi gitmez.
+// Authorize'dan çıkış yapılınca istekler gerçekten 401 alır, test eden gerçek davranışı görür.
 function swaggerAc(tanimIstegi) {
   return window.SwaggerUIBundle({
     url: TANIM,
@@ -35,7 +63,8 @@ function swaggerAc(tanimIstegi) {
     requestInterceptor: (istek) => {
       if (istek.url.endsWith(TANIM)) return tanimIstegi(istek);
       istek.credentials = 'omit';
-      return istek;
+      const anahtar = authorizeAnahtari(istek);
+      return anahtar ? imzala(istek, anahtar) : istek;
     },
   });
 }
@@ -75,8 +104,8 @@ function anahtarIste(hata) {
 
 // Anahtarı dener. Geçerliyse doküman anahtarla açılır, değilse form hata mesajıyla yeniden çıkar.
 function anahtarla(anahtar) {
-  const baslik = `Bearer ${anahtar}`;
-  fetch(TANIM, { headers: { Authorization: baslik } })
+  imzala({ url: TANIM, method: 'GET', headers: {} }, anahtar)
+    .then((istek) => fetch(TANIM, { headers: istek.headers }))
     .then((cevap) => {
       if (!cevap.ok) throw new Error('gecersiz');
       sakla(anahtar);
@@ -84,12 +113,9 @@ function anahtarla(anahtar) {
       cikis.type = 'button';
       cikis.addEventListener('click', () => { sakla(null); window.location.reload(); });
       const bilgi = eleman('div', 'ag-bilgi');
-      bilgi.append(eleman('span', '', "API anahtarıyla açıldı. Try it out istekleri Authorize'daki anahtarla gider, çıkış yapılırsa 401 alır."), cikis);
+      bilgi.append(eleman('span', '', "API anahtarıyla açıldı. Try it out istekleri Authorize'daki anahtarla imzalanır, çıkış yapılırsa 401 alır."), cikis);
       KUTU.replaceChildren(bilgi);
-      const ui = swaggerAc((istek) => {
-        istek.headers.Authorization = baslik;
-        return istek;
-      });
+      const ui = swaggerAc((istek) => imzala(istek, anahtar));
       // Authorize'a anahtar girilmiş gelir, ayrıca girmeye gerek kalmaz.
       ui.preauthorizeApiKey('HTTPBearer', anahtar);
     })

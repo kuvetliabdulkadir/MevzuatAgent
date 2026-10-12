@@ -34,6 +34,7 @@ from argon2.exceptions import InvalidHashError, VerificationError
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
+from mevzuat import panel_ayarlari
 from mevzuat.db import ApiAnahtari, Denetim, Kullanici, ParolaLinki
 from mevzuat.mail import Mail
 
@@ -258,8 +259,9 @@ def kullanici_ekle(session: Session, eposta: str, ad: str, rol: str, parola: str
 
 # Yeni anahtar üretir. Arkasında o rolde bir API hesabı açılır. Anahtarın kendisi sadece burada döner, saklanmaz.
 def api_anahtari_uret(session: Session, ad: str, rol: str, gun: int | None, olusturan: Kullanici | None,
-                      ip: str | None = None) -> tuple[ApiAnahtari, str]:
-    """olusturan None ise anahtar sunucuda komut satırından üretilmiştir (panel kullanılmayan kurulum)."""
+                      ip: str | None = None, gizli_anahtar: str | None = None) -> tuple[ApiAnahtari, str]:
+    """olusturan None ise anahtar sunucuda komut satırından üretilmiştir (panel kullanılmayan kurulum).
+    gizli_anahtar verilirse anahtar şifreli olarak da saklanır, imzalı istekler onunla doğrulanır."""
     ad = " ".join(ad.split())
     if not ad or len(ad) > 100:
         raise ValueError("Anahtara 1-100 karakterlik bir ad verin (ör. Muhasebe entegrasyonu).")
@@ -268,7 +270,11 @@ def api_anahtari_uret(session: Session, ad: str, rol: str, gun: int | None, olus
     if gun is not None and not 1 <= gun <= 3650:
         raise ValueError("Süre 1 ile 3650 gün arasında olmalı ya da süresiz seçilmeli.")
     simdi = datetime.now()
-    anahtar = API_ANAHTARI_ON_EKI + secrets.token_urlsafe(32)
+    # İlk harfler imzalı istekte anahtarı bulmaya yarar, benzersiz olmalı.
+    while True:
+        anahtar = API_ANAHTARI_ON_EKI + secrets.token_urlsafe(32)
+        if session.scalar(select(ApiAnahtari.id).where(ApiAnahtari.on_ek == anahtar[:10])) is None:
+            break
     hesap = Kullanici(eposta=f"api-{secrets.token_hex(8)}@api.anahtari", ad=f"API: {ad}", rol=rol,
                       parola_hash=parola_hashle(secrets.token_urlsafe(32)), aktif=True, api_hesabi=True,
                       basarisiz_giris=0, olusturuldu=simdi)
@@ -276,7 +282,8 @@ def api_anahtari_uret(session: Session, ad: str, rol: str, gun: int | None, olus
     session.flush()
     olusturan_id = olusturan.id if olusturan else None
     kayit = ApiAnahtari(ad=ad, kullanici_id=hesap.id, on_ek=anahtar[:10], ozet=_ozet(anahtar), olusturan_id=olusturan_id,
-                        olusturuldu=simdi, son_kullanma=simdi + timedelta(days=gun) if gun else None)
+                        olusturuldu=simdi, son_kullanma=simdi + timedelta(days=gun) if gun else None,
+                        gizli=panel_ayarlari.sifrele(anahtar, gizli_anahtar) if gizli_anahtar else None)
     session.add(kayit)
     session.flush()
     denetle(session, "api_anahtari_uretildi", olusturan_id, ip, anahtar_id=kayit.id, ad=ad, rol=rol, gun=gun)

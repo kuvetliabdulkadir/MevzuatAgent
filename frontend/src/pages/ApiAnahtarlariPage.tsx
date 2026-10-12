@@ -48,7 +48,6 @@ export const ApiAnahtarlariPage: React.FC = () => {
     },
   });
 
-  const baslik = veri?.baslik ?? 'Authorization: Bearer';
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-paper-300">
@@ -65,7 +64,7 @@ export const ApiAnahtarlariPage: React.FC = () => {
       <div className="p-3.5 sm:p-4 rounded-xl bg-paper-200 border border-paper-300 text-xs text-stone-600 flex items-start gap-3">
         <Shield className="w-5 h-5 text-petrol shrink-0 mt-0.5" />
         <div className="space-y-1 leading-relaxed">
-          <p>Dış sistem her istekte anahtarı <code className="font-mono bg-white px-1 rounded-sm">{baslik} mvz_...</code> biçiminde gönderir. API Dokümanı sayfasında <strong>Authorize</strong> düğmesine girilince istekler o anahtarla atılır.</p>
+          <p>Dış sistem anahtarı hiç göndermez, her isteği anahtarla <strong>imzalar</strong> (HMAC). Kopyalanan ya da değiştirilen istek reddedilir. Nasıl imzalanacağı API dokümanında Authorize penceresinde, Python, Node.js, C# ve Java örnekleri kurulum paketinde (deploy/imza-ornekleri). API Dokümanı sayfasında <strong>Authorize</strong> düğmesine anahtar girilince istekler o anahtarla imzalanıp atılır.</p>
           <p><strong>Tam yetki</strong> anahtarı her şeyi yapar (rapor onayı, kullanıcılar, ayarlar dahil), test ve entegrasyon içindir. Yönetici ve onaylayıcı anahtarı o rolün panelde yapabildiğini yapar.</p>
           <p>Her istek denetim kaydına yazılır. Anahtar sadece üretildiği an gösterilir; kaybedilirse iptal edilip yenisi üretilir.</p>
           <p>Panel hesabı olmayan biri de dokümanı <strong>/api/dokuman</strong> adresinde açabilir, istek denemek için anahtarını sağ üstteki Authorize'a girer. Ya da dokümanı indirip anahtarla birlikte gönderin:</p>

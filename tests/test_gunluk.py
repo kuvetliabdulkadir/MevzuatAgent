@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from mevzuat import gunluk, pipeline
-from mevzuat.db import Gonderim, KaynakDurumu, Kullanici, Rapor, init_db
+from mevzuat.db import Gonderim, KaynakDurumu, KaynakTanimi, Kullanici, Rapor, init_db
 from mevzuat.filtre import konulari_yukle
 from mevzuat.mail import Mail
 from mevzuat.sources import kaynaklari_yukle
@@ -122,6 +122,22 @@ def test_nabiz_haftada_bir_gunun_ilk_calismasinda(session, kaynaklar, konular):
     nabiz = [m for m in posta.giden if "haftalık durum" in m.konu]
     assert len(nabiz) == 1
     assert "Mevzuat Takip sistemi çalışıyor" in nabiz[0].metin
+
+
+def test_nabiz_silinen_kaynagi_gostermez(session):
+    # Panelden silinen kaynağın checkpoint'i kalır, mailde görünmemeli. Durdurulan kaynak işaretli görünür.
+    zaman = PAZARTESI - timedelta(days=5)
+    for ad, aktif, kaldirildi in [("reddit", True, True), ("rekabet", False, False), ("masak", True, False)]:
+        session.add(KaynakTanimi(ad=ad, etiket=ad, tip="rss", aktif=aktif, kaldirildi=kaldirildi, guncelleme=zaman))
+        session.add(KaynakDurumu(kaynak=ad, checkpoint="2026-09-23", guncellendi=zaman))
+    session.add(KaynakDurumu(kaynak="resmi_gazete", checkpoint="2026-09-28", guncellendi=PAZARTESI))
+    session.commit()
+
+    metin = gunluk._nabiz_mail(session, PAZARTESI, ["admin@firma.com"]).metin
+
+    assert "'reddit'" not in metin
+    assert "Kaynak 'rekabet' (durduruldu)" in metin
+    assert "Kaynak 'masak':" in metin and "Kaynak 'resmi_gazete':" in metin
 
 
 def test_kilit_varken_ikinci_calisma_atlanir(tmp_path):
