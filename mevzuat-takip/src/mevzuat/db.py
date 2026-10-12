@@ -375,6 +375,20 @@ class ApiAnahtari(Base):
     son_kullanma: Mapped[datetime | None]  # boşsa süresiz
     son_kullanim: Mapped[datetime | None]
     iptal: Mapped[datetime | None]
+    # İstek imzası için anahtarın kendisi, GIZLI_ANAHTAR ile şifreli. Eski anahtarlarda boş, onlar imza atamaz.
+    gizli: Mapped[str | None] = mapped_column(Text)
+
+
+# İmzalı isteklerin tek seferlik numaraları. Aynı numara ikinci kez gelirse istek reddedilir (kopyalanan istek).
+# Numaralar imza süresi geçince silinir, eski istek zaten saat kontrolüne takılır.
+class IstekNumarasi(Base):
+    __tablename__ = "istek_numaralari"
+    __table_args__ = (UniqueConstraint("anahtar_id", "numara"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anahtar_id: Mapped[int] = mapped_column(ForeignKey("api_anahtarlari.id"))
+    numara: Mapped[str] = mapped_column(String(64))
+    zaman: Mapped[datetime] = mapped_column(index=True)
 
 
 # Panelin sol menüsü. Arayüz menüyü buradan çeker, kullanıcının yetkisine uyan aktif öğeleri gösterir.

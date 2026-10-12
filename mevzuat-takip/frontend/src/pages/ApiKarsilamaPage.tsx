@@ -22,9 +22,8 @@ export const ApiKarsilamaPage: React.FC = () => (
     <DokumanIndir />
     <div className="p-4 rounded-xl bg-paper-200 border border-paper-300 text-xs text-stone-700 space-y-2 leading-relaxed">
       <div className="flex items-center gap-2 font-semibold text-stone-900"><KeyRound className="w-4 h-4 text-petrol" /> İstek atmak için</div>
-      <p>Yöneticiden bir <strong>API anahtarı</strong> isteyin. Dokümanda sağ üstteki <strong>Authorize</strong> düğmesine anahtarı girin, "Try it out" ile istekler o anahtarla atılır.</p>
-      <p>Kendi sisteminizden çağırırken anahtarı her istekte başlıkta gönderin:</p>
-      <pre className="p-2.5 rounded-lg bg-white border border-paper-300 font-mono text-[11px] overflow-x-auto">{`curl -H "Authorization: Bearer mvz_..." ${window.location.origin}/api/raporlar`}</pre>
+      <p>Yöneticiden bir <strong>API anahtarı</strong> isteyin. Dokümanda sağ üstteki <strong>Authorize</strong> düğmesine anahtarı girin, "Try it out" ile istekler o anahtarla imzalanıp atılır.</p>
+      <p>Kendi sunucunuzdan çağırırken anahtar gönderilmez, her istek anahtarla imzalanır (X-Anahtar, X-Zaman, X-Numara, X-Imza başlıkları). Ayrıntı dokümandaki Authorize penceresinde. Anahtar tarayıcıdaki koda konmaz.</p>
     </div>
   </div>
 );

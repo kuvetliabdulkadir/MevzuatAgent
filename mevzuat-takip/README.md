@@ -58,9 +58,13 @@ Panel sayfaları: Raporlar (onay) · Alıcı grupları · Kaynaklar · Konular �
 Sol menü veritabanından gelir (`menu_ogeleri`), her kullanıcı yetkisine uyan öğeleri görür.
 
 **API:** Panelde yapılabilen her şey API'den de yapılır, şirket portalı bizim arayüz yerine bunu kullanabilir.
-Portalın kullandığı adresler sürümlüdür (`/api/v1`): mevzuat arama, rapor onayı, tarama, kaynak, konu ve alıcı grubu. Biçimleri değişmez, gerekirse `/api/v2` açılır. Kullanıcı, ayar ve denetim adresleri panelin, sürümsüzdür. Doküman (Swagger) `/api/dokuman` adresinde, doğrudan açılır (`MEVZUAT_DOKUMAN_ACIK=0` ise anahtar ister), HTML ya
-da OpenAPI JSON olarak da indirilir. Anahtar `Authorization: Bearer mvz_...` biçiminde gönderilir, panelden ya da `api-anahtari-uret`
-komutuyla üretilir. Anahtar seçilen rolün (tam yetki, admin ya da onaylayıcı) yetkisiyle çalışır,
+Dış sistemlerin bütün adresleri `/api/v1` altındadır: mevzuat, raporlar ve onay, konular, kaynaklar, alıcı grupları, tarama, kullanıcılar, ayarlar, denetim kaydı. Doküman (Swagger) `/api/dokuman` adresinde, doğrudan açılır (`MEVZUAT_DOKUMAN_ACIK=0` ise anahtar ister), HTML ya
+da OpenAPI JSON olarak da indirilir. Anahtar panelden ya da `api-anahtari-uret` komutuyla üretilir.
+**Anahtarın kendisi gönderilmez**, her istek anahtarla imzalanır (HMAC-SHA256, `X-Anahtar`, `X-Zaman`, `X-Numara`, `X-Imza`).
+Kopyalanan istek (aynı numara), değiştirilen istek (imza tutmaz) ve 5 dakikadan eski istek reddedilir, anahtar başına dakikada
+en fazla 300 istek. Python, Node.js, C# ve Java örnekleri: [deploy/imza-ornekleri](deploy/imza-ornekleri).
+API adresleri tarayıcıda yeni sekmede açılmaz, panel oturumu açık olsa da. `MEVZUAT_API_IMZA=0` sadece deneme içindir,
+o zaman anahtar `Authorization: Bearer` ile gönderilir. Anahtar seçilen rolün (tam yetki, admin ya da onaylayıcı) yetkisiyle çalışır,
 süreli ya da süresiz olur, iptal edilebilir, her isteği denetim kaydına yazılır, kendisi değil özeti saklanır.
 Adım adım deneme senaryoları (adres, gövde, beklenen sonuç): [deploy/API-TEST-REHBERI.md](deploy/API-TEST-REHBERI.md).
 
