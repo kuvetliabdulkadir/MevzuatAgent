@@ -63,6 +63,7 @@ da OpenAPI JSON olarak da indirilir. Anahtar panelden ya da `api-anahtari-uret` 
 **Anahtarın kendisi gönderilmez**, her istek anahtarla imzalanır (HMAC-SHA256, `X-Anahtar`, `X-Zaman`, `X-Numara`, `X-Imza`).
 Kopyalanan istek (aynı numara), değiştirilen istek (imza tutmaz) ve 5 dakikadan eski istek reddedilir, anahtar başına dakikada
 en fazla 300 istek. Python, Node.js, C# ve Java örnekleri: [deploy/imza-ornekleri](deploy/imza-ornekleri).
+Portal ekibine verilecek tek sayfalık bağlantı belgesi: [deploy/PORTAL-BAGLANTI.md](deploy/PORTAL-BAGLANTI.md).
 API adresleri tarayıcıda yeni sekmede açılmaz, panel oturumu açık olsa da. `MEVZUAT_API_IMZA=0` sadece deneme içindir,
 o zaman anahtar `Authorization: Bearer` ile gönderilir. Anahtar seçilen rolün (tam yetki, admin ya da onaylayıcı) yetkisiyle çalışır,
 süreli ya da süresiz olur, iptal edilebilir, her isteği denetim kaydına yazılır, kendisi değil özeti saklanır.
