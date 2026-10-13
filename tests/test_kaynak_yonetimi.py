@@ -99,7 +99,7 @@ def test_ayar_temizleme():
 # ---- API ------------------------------------------------------------------------------------------------
 
 def _istek(client, yontem, yol, veri=None):
-    csrf = client.get("/api/oturum").json()["csrf"]
+    csrf = client.get("/panel/api/oturum").json()["csrf"]
     return client.request(yontem, yol, json=veri, headers={"X-CSRF-Token": csrf})
 
 
@@ -120,7 +120,7 @@ def ortam(monkeypatch):
                         ilk_gorulme=datetime.now(), calisma_id=1))
         s.commit()
     client = TestClient(uygulama_olustur(engine, None, None, "t" * 40, ek_ekle=False, arayuz=None))
-    _istek(client, "post", "/api/giris", {"eposta": "sorumlu@firma.com", "parola": PAROLA})
+    _istek(client, "post", "/panel/api/giris", {"eposta": "sorumlu@firma.com", "parola": PAROLA})
     return client, engine
 
 
@@ -130,39 +130,39 @@ YENI = {"tip": "wordpress", "etiket": "BDDK Duyurusu",
 
 def test_liste_durumla_gelir(ortam):
     client, _ = ortam
-    liste = {k["ad"]: k for k in client.get("/api/kaynaklar").json()["kaynaklar"]}
+    liste = {k["ad"]: k for k in client.get("/panel/api/kaynaklar").json()["kaynaklar"]}
     assert list(liste) == ["resmi_gazete", "masak", "gib_mevzuat", "mevzuat_gov_yeni"]
     assert liste["masak"]["checkpoint"] == "2026-10-02T06:30:00" and liste["masak"]["toplam_kayit"] == 3
     assert liste["masak"]["ilgili_kayit"] == 1 and liste["masak"]["son_hata"] is None
     assert liste["gib_mevzuat"]["son_hata"] == "ConnectError('kapalı')"
     assert liste["masak"]["varsayilan_konular"] == ["MASAK / suç gelirleri / yaptırımlar"]
-    tipler = {t["tip"]: t for t in client.get("/api/kaynak-tipleri").json()["tipler"]}
+    tipler = {t["tip"]: t for t in client.get("/panel/api/kaynak-tipleri").json()["tipler"]}
     assert tipler["wordpress"]["eklenebilir"] and not tipler["resmi_gazete"]["eklenebilir"]
     assert tipler["gib"]["alanlar"][0]["secenekler"]["1"] == "Mevzuat"
 
 
 def test_ekle_duzenle_kaldir_geri_getir_denetime_yazilir(ortam):
     client, engine = ortam
-    cevap = _istek(client, "post", "/api/kaynaklar", YENI)
+    cevap = _istek(client, "post", "/panel/api/kaynaklar", YENI)
     assert cevap.status_code == 200, cevap.text
     yeni = cevap.json()
     assert yeni["ad"] == "bddk_duyurusu" and yeni["surum"] == 1 and yeni["ayarlar"]["ortusme_gun"] == 1
 
     # Aynı görünen adla ikinci kaynak: kod adı çakışmaz.
-    assert _istek(client, "post", "/api/kaynaklar", YENI).json()["ad"] == "bddk_duyurusu_2"
+    assert _istek(client, "post", "/panel/api/kaynaklar", YENI).json()["ad"] == "bddk_duyurusu_2"
 
-    konu_adi = next(k for k in client.get("/api/kaynak-tipleri").json()["konular"] if k.startswith("Vergi"))
+    konu_adi = next(k for k in client.get("/panel/api/kaynak-tipleri").json()["konular"] if k.startswith("Vergi"))
     duzenleme = {**YENI, "etiket": "BDDK", "varsayilan_konular": [konu_adi], "surum": 1}
-    cevap = _istek(client, "put", "/api/kaynaklar/bddk_duyurusu", duzenleme)
+    cevap = _istek(client, "put", "/panel/api/kaynaklar/bddk_duyurusu", duzenleme)
     assert cevap.status_code == 200 and cevap.json()["etiket"] == "BDDK" and cevap.json()["surum"] == 2
     # Eski formla (sürüm 1) ikinci düzenleme: çakışma.
-    assert _istek(client, "put", "/api/kaynaklar/bddk_duyurusu", duzenleme).status_code == 409
+    assert _istek(client, "put", "/panel/api/kaynaklar/bddk_duyurusu", duzenleme).status_code == 409
 
-    assert _istek(client, "post", "/api/kaynaklar/bddk_duyurusu/kaldir", {"surum": 2}).status_code == 200
+    assert _istek(client, "post", "/panel/api/kaynaklar/bddk_duyurusu/kaldir", {"surum": 2}).status_code == 200
     with Session(engine) as s:
         assert "bddk_duyurusu" not in [k.ad for k in tanimlar.kaynaklari_oku(s)]
-    assert _istek(client, "post", "/api/kaynaklar/bddk_duyurusu/kaldir", {"surum": 3}).status_code == 400
-    assert _istek(client, "post", "/api/kaynaklar/bddk_duyurusu/geri-getir", {"surum": 3}).status_code == 200
+    assert _istek(client, "post", "/panel/api/kaynaklar/bddk_duyurusu/kaldir", {"surum": 3}).status_code == 400
+    assert _istek(client, "post", "/panel/api/kaynaklar/bddk_duyurusu/geri-getir", {"surum": 3}).status_code == 200
     with Session(engine) as s:
         kaynak = next(k for k in tanimlar.kaynaklari_oku(s) if k.ad == "bddk_duyurusu")
         assert kaynak.etiket == "BDDK" and kaynak.varsayilan_konular == (konu_adi,)
@@ -184,7 +184,7 @@ def test_ekle_duzenle_kaldir_geri_getir_denetime_yazilir(ortam):
 ])
 def test_hatali_kaynak_kaydedilmez(ortam, degisiklik, hata):
     client, engine = ortam
-    cevap = _istek(client, "post", "/api/kaynaklar", {**YENI, **degisiklik})
+    cevap = _istek(client, "post", "/panel/api/kaynaklar", {**YENI, **degisiklik})
     assert cevap.status_code == 400 and hata in cevap.json()["detail"]
     with Session(engine) as s:
         assert len(s.scalars(select(KaynakTanimi)).all()) == 4
@@ -192,7 +192,7 @@ def test_hatali_kaynak_kaydedilmez(ortam, degisiklik, hata):
 
 def test_rg_duzenlenebilir_ad_ve_tip_degismez(ortam):
     client, engine = ortam
-    cevap = _istek(client, "put", "/api/kaynaklar/resmi_gazete",
+    cevap = _istek(client, "put", "/panel/api/kaynaklar/resmi_gazete",
                    {"tip": "wordpress", "etiket": "Resmî Gazete (T.C.)", "ayarlar": {"api_url": "https://x.gov.tr"},
                     "varsayilan_konular": [], "surum": 1})
     assert cevap.status_code == 200
@@ -203,10 +203,10 @@ def test_rg_duzenlenebilir_ad_ve_tip_degismez(ortam):
 
 def test_girissiz_ve_csrfsiz_istek_reddedilir(ortam):
     client, _ = ortam
-    assert client.post("/api/kaynaklar", json=YENI).status_code == 403  # CSRF yok
-    _istek(client, "post", "/api/cikis")
-    assert client.get("/api/kaynaklar").status_code == 401
-    assert _istek(client, "post", "/api/kaynaklar/dene", YENI).status_code == 401
+    assert client.post("/panel/api/kaynaklar", json=YENI).status_code == 403  # CSRF yok
+    _istek(client, "post", "/panel/api/cikis")
+    assert client.get("/panel/api/kaynaklar").status_code == 401
+    assert _istek(client, "post", "/panel/api/kaynaklar/dene", YENI).status_code == 401
 
 
 def test_dene_kaydetmeden_tarar_eslesmeleri_gosterir(ortam, monkeypatch):
@@ -218,7 +218,7 @@ def test_dene_kaydetmeden_tarar_eslesmeleri_gosterir(ortam, monkeypatch):
         return httpx.Response(200, json=MASAK, headers={"X-WP-TotalPages": "1"})
 
     monkeypatch.setattr(ky, "make_client", lambda **_: make_client(transport=httpx.MockTransport(handler)))
-    cevap = _istek(client, "post", "/api/kaynaklar/dene", YENI)
+    cevap = _istek(client, "post", "/panel/api/kaynaklar/dene", YENI)
     assert cevap.status_code == 200, cevap.text
     sonuc = cevap.json()
     assert sonuc["toplam"] == len(MASAK) and sonuc["gun"] == 7 and not sonuc["kesildi"]
@@ -236,5 +236,5 @@ def test_dene_ulasilamayan_kaynakta_anlasilir_hata(ortam, monkeypatch):
         return httpx.Response(404, json={"code": "rest_no_route"})
 
     monkeypatch.setattr(ky, "make_client", lambda **_: make_client(transport=httpx.MockTransport(handler)))
-    cevap = _istek(client, "post", "/api/kaynaklar/dene", YENI)
+    cevap = _istek(client, "post", "/panel/api/kaynaklar/dene", YENI)
     assert cevap.status_code == 400 and "ulaşılamadı" in cevap.json()["detail"]

@@ -113,7 +113,7 @@ export const GirisPage: React.FC<GirisPageProps> = ({ baslangic, onGirisTamam })
                 okutun, sonra uygulamanın gösterdiği 6 haneli kodu girin.
               </p>
               {/* QR resmi doğrudan sunucudan gelir. */}
-              <img src="/api/giris/mfa-qr.svg" alt="Doğrulayıcı uygulama için QR kodu"
+              <img src="/panel/api/giris/mfa-qr.svg" alt="Doğrulayıcı uygulama için QR kodu"
                 className="w-48 h-48 mx-auto border border-paper-300 rounded-lg p-2 bg-white" />
               {gizli && (
                 <p className="text-center text-stone-500">

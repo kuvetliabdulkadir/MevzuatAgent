@@ -34,7 +34,7 @@ async function istek<T>(yontem: string, yol: string, govde?: unknown): Promise<T
     basliklar['X-CSRF-Token'] = csrfToken;
   }
   // İsteği gönder. credentials, oturum çerezi de gitsin.
-  const cevap = await fetch(`/api${yol}`, {
+  const cevap = await fetch(`/panel/api${yol}`, {
     method: yontem,
     headers: basliklar,
     body: govde === undefined ? undefined : JSON.stringify(govde),

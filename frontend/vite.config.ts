@@ -41,6 +41,6 @@ export default defineConfig({
   server: {
     // Geliştirme: `npm run dev` (5173) + `mevzuat.cli panel` (8000). API istekleri panele aktarılır;
     // tarayıcı açısından tek adres olduğu için çerez ve CSRF üretimdeki gibi çalışır.
-    proxy: { '/api': 'http://127.0.0.1:8000' },
+    proxy: { '/api': 'http://127.0.0.1:8000', '/panel/api': 'http://127.0.0.1:8000' },
   },
 })

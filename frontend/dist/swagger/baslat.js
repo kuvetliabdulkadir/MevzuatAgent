@@ -127,7 +127,7 @@ function anahtarla(anahtar) {
 
 // Kapalı dokümanda panel oturumuna ya da anahtara bakılır.
 function kapaliDokuman() {
-  return fetch('/api/oturum', { credentials: 'same-origin' })
+  return fetch('/panel/api/oturum', { credentials: 'same-origin' })
     .then((cevap) => cevap.json())
     .then((oturum) => {
       // Panel oturumu dokümanı görebiliyorsa (admin, API kullanıcısı) oturumla açılır. Göremiyorsa (onaylayıcı) anahtar istenir.

@@ -1,4 +1,4 @@
-// Sol menü. Öğeler veritabanından gelir (/api/menu), sunucu sadece kullanıcının yetkisine uyanları gönderir.
+// Sol menü. Öğeler veritabanından gelir (/panel/api/menu), sunucu sadece kullanıcının yetkisine uyanları gönderir.
 import React, { useEffect, useState } from 'react';
 import {
   BookOpen, Circle, Clock, ExternalLink, FileCheck2, Globe, History, Info, KeyRound, Layers, LucideIcon, Mail, Settings,

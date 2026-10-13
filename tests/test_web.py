@@ -65,7 +65,7 @@ def ortam(arayuz):
 
 
 def _csrf(client: TestClient) -> str:
-    return client.get("/api/oturum").json()["csrf"]
+    return client.get("/panel/api/oturum").json()["csrf"]
 
 
 def _post(client: TestClient, yol: str, veri: dict, csrf: str | None = None):
@@ -77,7 +77,7 @@ def _put(client: TestClient, yol: str, veri: dict):
 
 
 def _giris(client: TestClient, parola: str = PAROLA, eposta: str = "sorumlu@firma.com"):
-    return _post(client, "/api/giris", {"eposta": eposta, "parola": parola})
+    return _post(client, "/panel/api/giris", {"eposta": eposta, "parola": parola})
 
 
 def _kayit_idleri(engine, rapor_id: int) -> list[int]:
@@ -89,10 +89,10 @@ def _kayit_idleri(engine, rapor_id: int) -> list[int]:
 
 def test_girissiz_erisim_reddedilir(ortam):
     client, _, posta, rapor_id = ortam
-    for yol in ["/api/raporlar", f"/api/raporlar/{rapor_id}", "/api/gruplar"]:
+    for yol in ["/panel/api/raporlar", f"/panel/api/raporlar/{rapor_id}", "/panel/api/gruplar"]:
         assert client.get(yol).status_code == 401
-    assert _post(client, f"/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [1]}).status_code == 401
-    assert client.get("/api/oturum").json()["kullanici"] is None
+    assert _post(client, f"/panel/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [1]}).status_code == 401
+    assert client.get("/panel/api/oturum").json()["kullanici"] is None
     assert posta.giden == []
 
 
@@ -102,7 +102,7 @@ def test_giris_ve_guvenlik_basliklari(ortam):
     assert cevap.status_code == 200 and cevap.json()["sonraki"] == "panel"
     cerez = cevap.headers["set-cookie"].lower()
     assert "httponly" in cerez and "samesite=strict" in cerez
-    oturum = client.get("/api/oturum")
+    oturum = client.get("/panel/api/oturum")
     kullanici = oturum.json()["kullanici"]
     assert kullanici["ad"] == "Ayşe Sorumlu" and kullanici["karar_verebilir"] and kullanici["grup_yonetebilir"]
     assert "parola_hash" not in kullanici and "mfa_gizli" not in kullanici
@@ -134,13 +134,13 @@ def test_art_arda_hatali_giriste_hesap_kilitlenir(ortam):
 
 def test_csrf_olmadan_giris_ve_karar_reddedilir(ortam):
     client, engine, posta, rapor_id = ortam
-    client.get("/api/oturum")
-    assert _post(client, "/api/giris", {"eposta": "sorumlu@firma.com", "parola": PAROLA}, csrf="sahte").status_code == 403
-    cevap = client.post("/api/giris", json={"eposta": "sorumlu@firma.com", "parola": PAROLA})  # başlıksız
+    client.get("/panel/api/oturum")
+    assert _post(client, "/panel/api/giris", {"eposta": "sorumlu@firma.com", "parola": PAROLA}, csrf="sahte").status_code == 403
+    cevap = client.post("/panel/api/giris", json={"eposta": "sorumlu@firma.com", "parola": PAROLA})  # başlıksız
     assert cevap.status_code == 403
     _giris(client)
     ilk = _kayit_idleri(engine, rapor_id)[0]
-    cevap = _post(client, f"/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [ilk]}, csrf="sahte")
+    cevap = _post(client, f"/panel/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [ilk]}, csrf="sahte")
     assert cevap.status_code == 403
     assert posta.giden == []
 
@@ -151,24 +151,24 @@ def test_giriste_csrf_tokeni_yenilenir(ortam):
     eski = _csrf(client)
     yeni = _giris(client).json()["csrf"]
     assert yeni != eski
-    assert _post(client, "/api/cikis", {}, csrf=eski).status_code == 403
+    assert _post(client, "/panel/api/cikis", {}, csrf=eski).status_code == 403
 
 
 def test_pasif_kullanicinin_acik_oturumu_kapanir(ortam):
     client, engine, *_ = ortam
     _giris(client)
-    assert client.get("/api/raporlar").status_code == 200
+    assert client.get("/panel/api/raporlar").status_code == 200
     with Session(engine) as s:
         s.scalar(select(Kullanici)).aktif = False
         s.commit()
-    assert client.get("/api/raporlar").status_code == 401
+    assert client.get("/panel/api/raporlar").status_code == 401
 
 
 def test_cikis(ortam):
     client, *_ = ortam
     _giris(client)
-    assert _post(client, "/api/cikis", {}).status_code == 200
-    assert client.get("/api/raporlar").status_code == 401
+    assert _post(client, "/panel/api/cikis", {}).status_code == 200
+    assert client.get("/panel/api/raporlar").status_code == 401
 
 
 def test_kisa_gizli_anahtar_reddedilir():
@@ -195,10 +195,10 @@ def test_parola_kurallari():
 def test_onay_akisi_uctan_uca(ortam):
     client, engine, posta, rapor_id = ortam
     _giris(client)
-    liste = client.get("/api/raporlar").json()
+    liste = client.get("/panel/api/raporlar").json()
     assert [r["id"] for r in liste["bekleyenler"]] == [rapor_id] and liste["gecmis"] == []
 
-    detay = client.get(f"/api/raporlar/{rapor_id}")
+    detay = client.get(f"/panel/api/raporlar/{rapor_id}")
     assert detay.headers["content-type"] == "application/json"  # HTML değil: başlık arayüzde metin olarak basılır
     kalemler = detay.json()["kalemler"]
     assert kalemler[1]["baslik"] == "<script>alert(1)</script> Yönetmeliği"
@@ -207,7 +207,7 @@ def test_onay_akisi_uctan_uca(ortam):
     assert all(k["nedenler"] == [] for k in kalemler)  # konulara açıklama yazılmamış
     ilk, ikinci = kalemler[0]["id"], kalemler[1]["id"]
 
-    cevap = _post(client, f"/api/raporlar/{rapor_id}/karar",
+    cevap = _post(client, f"/panel/api/raporlar/{rapor_id}/karar",
                   {"karar": "onayla", "dahil": [ilk], "notu": "Kuyum ekibi incelesin."})
     assert cevap.status_code == 200 and cevap.json()["tur"] == "basari" and "gönderildi" in cevap.json()["mesaj"]
 
@@ -221,13 +221,13 @@ def test_onay_akisi_uctan_uca(ortam):
         assert s.get(Kayit, ikinci).haric
         denetim = s.scalars(select(Denetim).where(Denetim.islem == "onay")).one()
         assert denetim.detay["rapor_id"] == rapor_id and denetim.detay["dahil"] == [ilk]
-    detay = client.get(f"/api/raporlar/{rapor_id}").json()
+    detay = client.get(f"/panel/api/raporlar/{rapor_id}").json()
     assert detay["rapor"]["karar_veren"] == "Ayşe Sorumlu"
     (gonderim,) = detay["gonderimler"]
     assert gonderim["durum"] == "GONDERILDI" and gonderim["gruplar"] == ["Kuyum Ekibi"] and gonderim["kalemler"] == [1]
 
     # Aynı rapora ikinci karar (ör. butona iki kez basma) dağıtımı tekrarlamaz.
-    tekrar = _post(client, f"/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [ilk]})
+    tekrar = _post(client, f"/panel/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [ilk]})
     assert tekrar.status_code == 409
     assert len(posta.giden) == 1
 
@@ -235,12 +235,12 @@ def test_onay_akisi_uctan_uca(ortam):
 def test_ek_gonderim_gonderilmeyen_kalemi_baska_kisiye_gonderir(ortam):
     client, engine, posta, rapor_id = ortam
     _giris(client)
-    kalemler = client.get(f"/api/raporlar/{rapor_id}").json()["kalemler"]
+    kalemler = client.get(f"/panel/api/raporlar/{rapor_id}").json()["kalemler"]
     ilk, ikinci = kalemler[0]["id"], kalemler[1]["id"]
-    _post(client, f"/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [ilk]})
+    _post(client, f"/panel/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [ilk]})
     assert len(posta.giden) == 1
 
-    cevap = _post(client, f"/api/raporlar/{rapor_id}/ek-gonderim",
+    cevap = _post(client, f"/panel/api/raporlar/{rapor_id}/ek-gonderim",
                   {"dahil": [ikinci], "gruplar": [], "ek_adresler": ["yeni@firma.com"], "notu": "Size de gelsin."})
     assert cevap.status_code == 200 and cevap.json()["tur"] == "basari" and "1 adrese" in cevap.json()["mesaj"]
     assert len(posta.giden) == 2
@@ -249,19 +249,19 @@ def test_ek_gonderim_gonderilmeyen_kalemi_baska_kisiye_gonderir(ortam):
     with Session(engine) as s:
         assert s.get(Rapor, rapor_id).durum == "GONDERILDI" and not s.get(Kayit, ikinci).haric
         assert s.scalars(select(Denetim).where(Denetim.islem == "ek_gonderim")).one().detay["dahil"] == [ikinci]
-    gonderimler = client.get(f"/api/raporlar/{rapor_id}").json()["gonderimler"]
+    gonderimler = client.get(f"/panel/api/raporlar/{rapor_id}").json()["gonderimler"]
     assert [g["notu"] for g in gonderimler] == [None, "Size de gelsin."]
     # Alıcısız istek reddedilir, mail gitmez.
-    bos = _post(client, f"/api/raporlar/{rapor_id}/ek-gonderim", {"dahil": [ikinci], "gruplar": []})
+    bos = _post(client, f"/panel/api/raporlar/{rapor_id}/ek-gonderim", {"dahil": [ikinci], "gruplar": []})
     assert bos.status_code == 400 and len(posta.giden) == 2
 
 
 def test_ret_notsuz_olmaz(ortam):
     client, engine, posta, rapor_id = ortam
     _giris(client)
-    cevap = _post(client, f"/api/raporlar/{rapor_id}/karar", {"karar": "reddet", "notu": "  "})
+    cevap = _post(client, f"/panel/api/raporlar/{rapor_id}/karar", {"karar": "reddet", "notu": "  "})
     assert cevap.status_code == 400 and "sebep yazmak zorunludur" in cevap.json()["detail"]
-    cevap = _post(client, f"/api/raporlar/{rapor_id}/karar", {"karar": "reddet", "notu": "İlgisiz."})
+    cevap = _post(client, f"/panel/api/raporlar/{rapor_id}/karar", {"karar": "reddet", "notu": "İlgisiz."})
     assert cevap.status_code == 200 and "reddedildi" in cevap.json()["mesaj"]
     with Session(engine) as s:
         assert s.get(Rapor, rapor_id).durum == "REDDEDILDI"
@@ -271,9 +271,9 @@ def test_ret_notsuz_olmaz(ortam):
 def test_gecersiz_karar_ve_olmayan_rapor(ortam):
     client, *_, rapor_id = ortam
     _giris(client)
-    assert _post(client, f"/api/raporlar/{rapor_id}/karar", {"karar": "sil"}).status_code == 422
-    assert client.get("/api/raporlar/999").status_code == 404
-    assert _post(client, "/api/raporlar/999/karar", {"karar": "reddet", "notu": "x"}).status_code == 404
+    assert _post(client, f"/panel/api/raporlar/{rapor_id}/karar", {"karar": "sil"}).status_code == 422
+    assert client.get("/panel/api/raporlar/999").status_code == 404
+    assert _post(client, "/panel/api/raporlar/999/karar", {"karar": "reddet", "notu": "x"}).status_code == 404
 
 
 def test_admin_raporu_gorur_ama_karar_veremez(ortam):
@@ -282,13 +282,13 @@ def test_admin_raporu_gorur_ama_karar_veremez(ortam):
     with Session(engine) as s:
         kullanici_ekle(s, "admin@firma.com", "Bilgi İşlem", "admin", PAROLA)
     _giris(client, eposta="admin@firma.com")
-    assert client.get("/api/oturum").json()["kullanici"]["karar_verebilir"] is False
-    assert client.get(f"/api/raporlar/{rapor_id}").status_code == 200
+    assert client.get("/panel/api/oturum").json()["kullanici"]["karar_verebilir"] is False
+    assert client.get(f"/panel/api/raporlar/{rapor_id}").status_code == 200
 
     ilk = _kayit_idleri(engine, rapor_id)[0]
-    cevap = _post(client, f"/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [ilk]})
+    cevap = _post(client, f"/panel/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [ilk]})
     assert cevap.status_code == 403
-    cevap = _post(client, f"/api/raporlar/{rapor_id}/ek-gonderim", {"dahil": [ilk], "ek_adresler": ["x@firma.com"]})
+    cevap = _post(client, f"/panel/api/raporlar/{rapor_id}/ek-gonderim", {"dahil": [ilk], "ek_adresler": ["x@firma.com"]})
     assert cevap.status_code == 403
     assert posta.giden == []
     with Session(engine) as s:
@@ -302,13 +302,13 @@ def test_admin_raporu_gorur_ama_karar_veremez(ortam):
 def _grup(client: TestClient, **alanlar):
     veri = {"ad": "Döviz Ekibi", "is_kollari": ["Döviz/Altın", "Ortak"],
             "adresler": ["Doviz1@firma.com", "doviz2@firma.com"], "aktif": True, **alanlar}
-    return _post(client, "/api/gruplar", veri)
+    return _post(client, "/panel/api/gruplar", veri)
 
 
 def test_onaylayici_grup_ekler_ve_duzenler_denetime_yazilir(ortam):
     client, engine, *_ = ortam
     _giris(client)
-    liste = client.get("/api/gruplar").json()
+    liste = client.get("/panel/api/gruplar").json()
     assert [g["ad"] for g in liste["gruplar"]] == ["Kuyum Ekibi"]
     assert liste["is_kollari"] == IS_KOLLARI and "Döviz/Altın" in liste["kapsanmayan"]
 
@@ -316,9 +316,9 @@ def test_onaylayici_grup_ekler_ve_duzenler_denetime_yazilir(ortam):
     assert cevap.status_code == 200
     grup = cevap.json()
     assert grup["adresler"] == ["doviz1@firma.com", "doviz2@firma.com"] and grup["is_kollari"] == ["Döviz/Altın", "Ortak"]
-    assert "Döviz/Altın" not in client.get("/api/gruplar").json()["kapsanmayan"]
+    assert "Döviz/Altın" not in client.get("/panel/api/gruplar").json()["kapsanmayan"]
 
-    cevap = _put(client, f"/api/gruplar/{grup['id']}", {"ad": "Döviz Ekibi", "is_kollari": ["Döviz/Altın"],
+    cevap = _put(client, f"/panel/api/gruplar/{grup['id']}", {"ad": "Döviz Ekibi", "is_kollari": ["Döviz/Altın"],
                                                         "adresler": ["doviz1@firma.com"], "aktif": False})
     assert cevap.status_code == 200 and cevap.json()["aktif"] is False
     with Session(engine) as s:
@@ -342,7 +342,7 @@ def test_hatali_grup_kaydedilmez(ortam):
     assert cevap.status_code == 400 and cevap.json()["detail"] == "Geçersiz e-posta adresi: yanlis-adres"
     cevap = _grup(client, ad="kuyum ekibi")
     assert cevap.status_code == 400 and "zaten var" in cevap.json()["detail"]
-    assert _put(client, "/api/gruplar/999", {"ad": "X", "is_kollari": ["Kuyum"], "adresler": ["x@firma.com"]}).status_code == 404
+    assert _put(client, "/panel/api/gruplar/999", {"ad": "X", "is_kollari": ["Kuyum"], "adresler": ["x@firma.com"]}).status_code == 404
     with Session(engine) as s:
         assert s.scalar(select(AliciGrubu).where(AliciGrubu.ad == "Döviz Ekibi")) is None
 
@@ -351,7 +351,7 @@ def test_grup_kaydi_csrf_ve_giris_ister(ortam):
     client, engine, *_ = ortam
     assert _grup(client).status_code == 401
     _giris(client)
-    cevap = client.post("/api/gruplar", json={"ad": "X", "is_kollari": ["Kuyum"], "adresler": ["x@firma.com"]})
+    cevap = client.post("/panel/api/gruplar", json={"ad": "X", "is_kollari": ["Kuyum"], "adresler": ["x@firma.com"]})
     assert cevap.status_code == 403
     with Session(engine) as s:
         assert s.scalar(select(AliciGrubu).where(AliciGrubu.ad == "X")) is None
@@ -363,9 +363,9 @@ def test_gruba_gitmeyen_kalem_gorunur_ve_grupsuz_onay_engellenir(ortam):
         s.scalar(select(AliciGrubu)).aktif = False
         s.commit()
     _giris(client)
-    kalemler = client.get(f"/api/raporlar/{rapor_id}").json()["kalemler"]
+    kalemler = client.get(f"/panel/api/raporlar/{rapor_id}").json()["kalemler"]
     assert kalemler[0]["gidecek"] == []
-    cevap = _post(client, f"/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [kalemler[0]["id"]]})
+    cevap = _post(client, f"/panel/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [kalemler[0]["id"]]})
     assert cevap.status_code == 400 and "hiçbir alıcı grubuna gitmiyor" in cevap.json()["detail"]
     assert posta.giden == []
     with Session(engine) as s:
@@ -382,7 +382,7 @@ def test_arayuz_dosyalari_sunulur_klasor_disina_cikilmaz(ortam):
     assert '<div id="root">' in client.get("/raporlar/5").text  # tek sayfa: bilinmeyen yol → index.html
     for yol in ["/..%2fgizli.txt", "/assets/..%2f..%2fgizli.txt", "/%2e%2e/gizli.txt"]:
         assert "DIŞARIDAKİ" not in client.get(yol).text, yol
-    assert client.get("/api/yok").status_code == 404
+    assert client.get("/panel/api/yok").status_code == 404
 
 
 def test_arayuz_derlenmemisse_aciklama():
@@ -397,12 +397,12 @@ def test_arayuz_derlenmemisse_aciklama():
 def test_onay_ekraninda_grup_secimi_ve_kisiye_ozel_adres(ortam):
     client, engine, posta, rapor_id = ortam
     _giris(client)
-    detay = client.get(f"/api/raporlar/{rapor_id}").json()
+    detay = client.get(f"/panel/api/raporlar/{rapor_id}").json()
     assert detay["gruplar"] == [{"id": detay["gruplar"][0]["id"], "ad": "Kuyum Ekibi", "adresler": ["herkes@firma.com"], "is_kollari": ["Kuyum"]}]
     assert detay["adres_onerileri"] == ["herkes@firma.com"]
     ilk = detay["kalemler"][0]["id"]
 
-    cevap = _post(client, f"/api/raporlar/{rapor_id}/karar", {
+    cevap = _post(client, f"/panel/api/raporlar/{rapor_id}/karar", {
         "karar": "onayla", "dahil": [ilk], "gruplar": [], "ek_adresler": ["avukat@firma.com"]})
     assert cevap.status_code == 200, cevap.text
     assert [m.alicilar for m in posta.giden] == [["avukat@firma.com"]]  # Kuyum Ekibi işaretlenmedi
@@ -418,11 +418,11 @@ def test_mail_kapaliyken_gonderildi_denmez(ortam, tmp_path):
     _, engine, _, rapor_id = ortam
     client = TestClient(uygulama_olustur(engine, DosyaGonderici(tmp_path), IS_KOLLARI, ANAHTAR, ek_ekle=False,
                                          arayuz=None))
-    assert client.get("/api/oturum").json()["mail_kapali"] is False  # girişsiz kişiye ayar bilgisi verilmez
+    assert client.get("/panel/api/oturum").json()["mail_kapali"] is False  # girişsiz kişiye ayar bilgisi verilmez
     _giris(client)
-    assert client.get("/api/oturum").json()["mail_kapali"] is True
-    ilk = client.get(f"/api/raporlar/{rapor_id}").json()["kalemler"][0]["id"]
-    cevap = _post(client, f"/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [ilk]}).json()
+    assert client.get("/panel/api/oturum").json()["mail_kapali"] is True
+    ilk = client.get(f"/panel/api/raporlar/{rapor_id}").json()["kalemler"][0]["id"]
+    cevap = _post(client, f"/panel/api/raporlar/{rapor_id}/karar", {"karar": "onayla", "dahil": [ilk]}).json()
     assert cevap["tur"] == "hata" and "GÖNDERİLMEDİ" in cevap["mesaj"]
     assert list(tmp_path.glob("*.eml"))
 
@@ -442,13 +442,13 @@ def migrasyonlu(tmp_path, arayuz):
 
 def test_menu_veritabanindan_yetkiye_gore_gelir(migrasyonlu):
     client, engine = migrasyonlu
-    assert client.get("/api/menu").status_code == 401
+    assert client.get("/panel/api/menu").status_code == 401
     _giris(client)
-    onaylayici = [m["anahtar"] for m in client.get("/api/menu").json()]
+    onaylayici = [m["anahtar"] for m in client.get("/panel/api/menu").json()]
     assert onaylayici == ["raporlar", "gruplar", "kaynaklar", "konular", "tarama"]  # API dokümanı yok
-    _post(client, "/api/cikis", {})
+    _post(client, "/panel/api/cikis", {})
     _giris(client, eposta="admin@firma.com")
-    admin = client.get("/api/menu").json()
+    admin = client.get("/panel/api/menu").json()
     assert [m["anahtar"] for m in admin] == ["raporlar", "gruplar", "kaynaklar", "konular", "tarama", "kullanicilar",
                                              "denetim", "ayarlar", "api_anahtarlari", "api_dokumani"]
     assert admin[-1] == {"anahtar": "api_dokumani", "etiket": "API Dokümanı", "aciklama": "Swagger, uç noktalar",
@@ -459,7 +459,7 @@ def test_menu_veritabanindan_yetkiye_gore_gelir(migrasyonlu):
         s.get(MenuOgesi, "denetim").sira = -1
         s.add(MenuOgesi(anahtar="gizli", etiket="Gizli", aciklama="", ikon="X", yetki="patron", sira=0, aktif=True))
         s.commit()
-    anahtarlar = [m["anahtar"] for m in client.get("/api/menu").json()]
+    anahtarlar = [m["anahtar"] for m in client.get("/panel/api/menu").json()]
     assert anahtarlar[0] == "denetim" and "tarama" not in anahtarlar and "gizli" not in anahtarlar
 
 
@@ -467,7 +467,7 @@ def test_api_dokumani_giris_ister_ve_csp_ile_uyumlu(migrasyonlu):
     client, _ = migrasyonlu
     # Sayfa kabuğu herkese açık, içinde veri yok. Doküman (openapi.json) oturum ya da anahtar ister.
     sayfa = client.get("/api/dokuman")
-    assert sayfa.status_code == 200 and "/swagger/swagger-ui-bundle.js" in sayfa.text and "/api/" not in sayfa.text.split("baslat.js")[1]
+    assert sayfa.status_code == 200 and "/swagger/swagger-ui-bundle.js" in sayfa.text and "/panel/api/" not in sayfa.text.split("baslat.js")[1]
     assert client.get("/api/dokuman/openapi.json").status_code == 401
     assert client.get("/api/dokuman/indir").status_code == 401
     _giris(client, eposta="admin@firma.com")
@@ -476,30 +476,30 @@ def test_api_dokumani_giris_ister_ve_csp_ile_uyumlu(migrasyonlu):
     # Tek doküman, sadece dış sistemlerin adresleri (/api/v1). Panelin bütün işlemleri v1 altında da var.
     sema = client.get("/api/dokuman/openapi.json").json()
     assert sema["info"]["title"] == "Mevzuat Takip API"
-    assert {"/api/v1/mevzuat", "/api/v1/mevzuat/{kayit_id}", "/api/v1/konular", "/api/v1/raporlar"} <= set(sema["paths"])
-    assert all(yol.startswith("/api/v1/") for yol in sema["paths"])
-    v1 = {"/api/v1/raporlar/{rapor_id}/ek-gonderim", "/api/v1/kullanicilar", "/api/v1/ayarlar", "/api/v1/denetim",
-          "/api/v1/kaynaklar/{ad}/geri-al", "/api/v1/konular/{konu_id}/gecmis", "/api/v1/ayarlar/mail-dene"}
+    assert {"/api/mevzuat", "/api/mevzuat/{kayit_id}", "/api/konular", "/api/raporlar"} <= set(sema["paths"])
+    assert all(yol.startswith("/api/") for yol in sema["paths"])
+    v1 = {"/api/raporlar/{rapor_id}/ek-gonderim", "/api/kullanicilar", "/api/ayarlar", "/api/denetim",
+          "/api/kaynaklar/{ad}/geri-al", "/api/konular/{konu_id}/gecmis", "/api/ayarlar/mail-dene"}
     assert v1 <= set(sema["paths"])
     assert list(sema["components"]["securitySchemes"]) == ["HTTPBearer"]
     # Panelin kendi girişi, anahtar yönetimi ve tekrar eden rapor okuma dokümanda yok, adresler yine çalışır.
-    gizli = ("/api/giris", "/api/oturum", "/api/parolam", "/api/api-anahtarlari", "/api/raporlar", "/api/raporlar/{rapor_id}")
+    gizli = ("/panel/api/giris", "/panel/api/oturum", "/panel/api/parolam", "/panel/api/api-anahtarlari", "/panel/api/raporlar", "/panel/api/raporlar/{rapor_id}")
     assert not any(p in sema["paths"] for p in gizli)
     # v1'e açılan panel adresleri dokümanda sadece v1 altında, cevapları sabit modelle.
-    assert "/api/gruplar" not in sema["paths"] and "/api/raporlar/{rapor_id}/karar" not in sema["paths"]
-    gruplar_cevabi = sema["paths"]["/api/v1/gruplar"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "/panel/api/gruplar" not in sema["paths"] and "/panel/api/raporlar/{rapor_id}/karar" not in sema["paths"]
+    gruplar_cevabi = sema["paths"]["/api/gruplar"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert gruplar_cevabi == {"$ref": "#/components/schemas/GrupListesi"}
     assert [e["name"] for e in sema["tags"]] == ["Mevzuat", "Raporlar", "Konular", "Kaynaklar", "Alıcı grupları", "Tarama",
                                                  "Kullanıcılar", "Ayarlar", "Denetim kaydı"]
     # Her panel uç noktası belgeli: Türkçe başlık, yetki satırı, hata cevapları.
     for yol, islemler in sema["paths"].items():
         for yontem, islem in islemler.items():
-            assert yol.startswith("/api/v1/") or "**Yetki:**" in islem["description"], (yontem, yol)
-    karar = sema["paths"]["/api/v1/raporlar/{rapor_id}/karar"]["post"]
+            assert yol.startswith("/api/") or "**Yetki:**" in islem["description"], (yontem, yol)
+    karar = sema["paths"]["/api/raporlar/{rapor_id}/karar"]["post"]
     assert karar["summary"] == "Raporu onayla ya da reddet" and {"400", "401", "403", "404", "409"} <= set(karar["responses"])
     assert sema["components"]["schemas"]["KararIstegi"]["examples"][0]["karar"] == "onayla"
     # Arayüz dosyaları, sağlık ve doküman adresleri dokümanda yok, her uç nokta bir grupta.
-    assert not any(p in sema["paths"] for p in ("/{yol}", "/saglik", "/api/dokuman", "/api/{yol}"))
+    assert not any(p in sema["paths"] for p in ("/{yol}", "/saglik", "/api/dokuman", "/panel/api/{yol}"))
     gruplar = {etiket for yol in sema["paths"].values() for islem in yol.values() for etiket in islem["tags"]}
     assert gruplar == {e["name"] for e in sema["tags"]}
 
@@ -512,7 +512,7 @@ def test_dokuman_indirilir_html_internetsiz_json_sunucu_adresli(migrasyonlu, ara
     _giris(client, eposta="admin@firma.com")
     html_ = client.get("/api/dokuman/indir?bicim=html")
     assert html_.status_code == 200 and "attachment" in html_.headers["content-disposition"]
-    assert "var SwaggerUIBundle" in html_.text and "/api/v1/mevzuat" in html_.text
+    assert "var SwaggerUIBundle" in html_.text and "/api/mevzuat" in html_.text
     assert "<script src=" not in html_.text and "<link" not in html_.text  # dışarıdan dosya çekmez
     json_ = client.get("/api/dokuman/indir?bicim=json")
     assert json_.status_code == 200 and json_.json()["info"]["title"] == "Mevzuat Takip API"
