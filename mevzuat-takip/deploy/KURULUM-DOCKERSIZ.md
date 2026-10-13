@@ -189,7 +189,7 @@ konur:
 | `https://mevzuat.firma.com.tr/` | Panel: onaylayıcı ve admin |
 | `https://mevzuat.firma.com.tr/api/dokuman` | API dokümanı (Swagger). Doğrudan açılır, panel hesabı gerekmez. İstek denemek için sağ üstteki **Authorize**'a API anahtarı girilir. `MEVZUAT_DOKUMAN_ACIK=0` ise doküman da anahtar ister |
 
-Dokümanda sistemin bütün işlemleri `/api/v1` altında: mevzuat, raporlar ve onay, konular, kaynaklar, alıcı grupları,
+Dokümanda sistemin bütün işlemleri `/api` altında: mevzuat, raporlar ve onay, konular, kaynaklar, alıcı grupları,
 tarama, kullanıcılar, ayarlar, denetim kaydı. Portal bizim arayüz yerine bunları kullanabilir.
 
 API anahtarlarını admin panelde **API Anahtarları** sayfasından üretir ve iptal eder. Panel kullanılmıyorsa sunucudan:

@@ -22,8 +22,8 @@ export async function istek(adres, anahtar, yontem, yol, veri) {
 
 const adres = process.env.MEVZUAT_ADRES;
 const anahtar = process.env.MEVZUAT_ANAHTAR;
-const liste = await istek(adres, anahtar, 'GET', '/api/v1/mevzuat?sadece_ilgili=false&adet=3');
+const liste = await istek(adres, anahtar, 'GET', '/api/mevzuat?sadece_ilgili=false&adet=3');
 console.log('Node.js, mevzuat:', liste.toplam);
-const onizleme = await istek(adres, anahtar, 'POST', '/api/v1/konular/onizleme',
+const onizleme = await istek(adres, anahtar, 'POST', '/api/konular/onizleme',
   { ad: 'Deneme', is_kollari: ['Ortak'], kelimeler: ['vergi'], haric: [], dislanan: [] });
 console.log('Node.js, konu önizleme:', onizleme.taranan);

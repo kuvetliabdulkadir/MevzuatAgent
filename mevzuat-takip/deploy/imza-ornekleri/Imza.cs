@@ -7,9 +7,9 @@ using System.Text;
 var adres = Environment.GetEnvironmentVariable("MEVZUAT_ADRES")!;
 var anahtar = Environment.GetEnvironmentVariable("MEVZUAT_ANAHTAR")!;
 using var http = new HttpClient();
-var liste = await MevzuatImza.Istek(http, adres, anahtar, "GET", "/api/v1/mevzuat?sadece_ilgili=false&adet=3", null);
+var liste = await MevzuatImza.Istek(http, adres, anahtar, "GET", "/api/mevzuat?sadece_ilgili=false&adet=3", null);
 Console.WriteLine("C#, mevzuat: " + System.Text.Json.JsonDocument.Parse(liste).RootElement.GetProperty("toplam"));
-var onizleme = await MevzuatImza.Istek(http, adres, anahtar, "POST", "/api/v1/konular/onizleme",
+var onizleme = await MevzuatImza.Istek(http, adres, anahtar, "POST", "/api/konular/onizleme",
     "{\"ad\":\"Deneme\",\"is_kollari\":[\"Ortak\"],\"kelimeler\":[\"vergi\"],\"haric\":[],\"dislanan\":[]}");
 Console.WriteLine("C#, konu önizleme: " + System.Text.Json.JsonDocument.Parse(onizleme).RootElement.GetProperty("taranan"));
 

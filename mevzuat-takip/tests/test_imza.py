@@ -35,11 +35,11 @@ def ortam(tmp_path, monkeypatch):
     app = uygulama_olustur(engine, Posta(), None, ANAHTAR, ek_ekle=False, arayuz=None,
                            ayar_oku=lambda db: panel_ayarlari.etkin(db, ANAHTAR))
     panel = TestClient(app)
-    csrf = panel.get("/api/oturum").json()["csrf"]
-    cevap = panel.post("/api/giris", json={"eposta": "admin@firma.com", "parola": PAROLA},
+    csrf = panel.get("/panel/api/oturum").json()["csrf"]
+    cevap = panel.post("/panel/api/giris", json={"eposta": "admin@firma.com", "parola": PAROLA},
                        headers={"X-CSRF-Token": csrf})
     csrf = cevap.json()["csrf"]
-    cevap = panel.post("/api/api-anahtarlari", json={"ad": "Şirket portalı", "rol": "tam", "gun": None},
+    cevap = panel.post("/panel/api/api-anahtarlari", json={"ad": "Şirket portalı", "rol": "tam", "gun": None},
                        headers={"X-CSRF-Token": csrf})
     assert cevap.status_code == 200, cevap.text
     return panel, TestClient(app), cevap.json()["anahtar"], engine
@@ -60,33 +60,33 @@ def _govde(veri):
 
 def test_imzali_istek_calisir_kopyasi_reddedilir(ortam):
     _, dis, anahtar, _ = ortam
-    basliklar = imzala(anahtar, "GET", "/api/v1/mevzuat?sadece_ilgili=false&adet=5")
-    assert dis.get("/api/v1/mevzuat?sadece_ilgili=false&adet=5", headers=basliklar).status_code == 200
+    basliklar = imzala(anahtar, "GET", "/api/mevzuat?sadece_ilgili=false&adet=5")
+    assert dis.get("/api/mevzuat?sadece_ilgili=false&adet=5", headers=basliklar).status_code == 200
     # Network sekmesinden kopyalanan istek, aynı başlıklarla, saniyeler içinde.
-    tekrar = dis.get("/api/v1/mevzuat?sadece_ilgili=false&adet=5", headers=basliklar)
+    tekrar = dis.get("/api/mevzuat?sadece_ilgili=false&adet=5", headers=basliklar)
     assert tekrar.status_code == 401 and "daha önce kullanıldı" in tekrar.json()["detail"]
 
 
 def test_degistirilen_istek_reddedilir(ortam):
     _, dis, anahtar, _ = ortam
     # Sorgu değişti.
-    basliklar = imzala(anahtar, "GET", "/api/v1/mevzuat?adet=5")
-    assert dis.get("/api/v1/mevzuat?adet=100", headers=basliklar).status_code == 401
+    basliklar = imzala(anahtar, "GET", "/api/mevzuat?adet=5")
+    assert dis.get("/api/mevzuat?adet=100", headers=basliklar).status_code == 401
     # Adres değişti.
-    basliklar = imzala(anahtar, "GET", "/api/v1/mevzuat")
-    assert dis.get("/api/v1/raporlar", headers=basliklar).status_code == 401
+    basliklar = imzala(anahtar, "GET", "/api/mevzuat")
+    assert dis.get("/api/raporlar", headers=basliklar).status_code == 401
     # Yöntem değişti.
-    basliklar = imzala(anahtar, "GET", "/api/v1/gruplar")
-    assert dis.post("/api/v1/gruplar", headers=basliklar, json={}).status_code == 401
+    basliklar = imzala(anahtar, "GET", "/api/gruplar")
+    assert dis.post("/api/gruplar", headers=basliklar, json={}).status_code == 401
     # Gövde değişti.
     veri = {"ad": "Kuyum", "is_kollari": ["Kuyum"], "adresler": ["kuyum@firma.com"], "aktif": True}
-    basliklar = imzala(anahtar, "POST", "/api/v1/gruplar", _govde(veri))
-    cevap = dis.post("/api/v1/gruplar", headers={**basliklar, "Content-Type": "application/json"},
+    basliklar = imzala(anahtar, "POST", "/api/gruplar", _govde(veri))
+    cevap = dis.post("/api/gruplar", headers={**basliklar, "Content-Type": "application/json"},
                      content=_govde({**veri, "adresler": ["saldirgan@kotu.com"]}))
     assert cevap.status_code == 401 and "İmza tutmuyor" in cevap.json()["detail"]
     # Doğru imzalı aynı gövde geçer.
-    basliklar = imzala(anahtar, "POST", "/api/v1/gruplar", _govde(veri))
-    cevap = dis.post("/api/v1/gruplar", headers={**basliklar, "Content-Type": "application/json"}, content=_govde(veri))
+    basliklar = imzala(anahtar, "POST", "/api/gruplar", _govde(veri))
+    cevap = dis.post("/api/gruplar", headers={**basliklar, "Content-Type": "application/json"}, content=_govde(veri))
     assert cevap.status_code == 200, cevap.text
 
 
@@ -94,24 +94,24 @@ def test_eski_ileri_tarihli_ve_bicimsiz_istek_reddedilir(ortam):
     _, dis, anahtar, _ = ortam
     simdi = int(time.time())
     for zaman in (simdi - imza.PENCERE - 5, simdi + imza.PENCERE + 5):
-        cevap = dis.get("/api/v1/konular", headers=imzala(anahtar, "GET", "/api/v1/konular", zaman=zaman))
+        cevap = dis.get("/api/konular", headers=imzala(anahtar, "GET", "/api/konular", zaman=zaman))
         assert cevap.status_code == 401 and "X-Zaman" in cevap.json()["detail"]
-    cevap = dis.get("/api/v1/konular", headers=imzala(anahtar, "GET", "/api/v1/konular", numara="kisa"))
+    cevap = dis.get("/api/konular", headers=imzala(anahtar, "GET", "/api/konular", numara="kisa"))
     assert cevap.status_code == 401
-    eksik = imzala(anahtar, "GET", "/api/v1/konular")
+    eksik = imzala(anahtar, "GET", "/api/konular")
     del eksik["X-Imza"]
-    assert dis.get("/api/v1/konular", headers=eksik).status_code == 401
+    assert dis.get("/api/konular", headers=eksik).status_code == 401
 
 
-def test_anahtar_dogrudan_gonderilemez_oturumla_v1_acilmaz(ortam):
+def test_anahtar_dogrudan_gonderilemez_oturumla_api_acilmaz(ortam):
     panel, dis, anahtar, engine = ortam
     for basliklar in ({"Authorization": f"Bearer {anahtar}"}, {"X-API-Anahtari": anahtar}):
-        cevap = dis.get("/api/v1/mevzuat", headers=basliklar)
+        cevap = dis.get("/api/mevzuat", headers=basliklar)
         assert cevap.status_code == 401 and "imzalanmalı" in cevap.json()["detail"]
-    # Panelde giriş yapmış kişi de /api/v1'i oturumla açamaz.
-    assert panel.get("/api/v1/mevzuat").status_code == 401
-    # İmza başlıkları panelin kendi adreslerinde geçmez, dış sistem sadece /api/v1 kullanır.
-    assert dis.get("/api/kullanicilar", headers=imzala(anahtar, "GET", "/api/kullanicilar")).status_code == 401
+    # Panelde giriş yapmış kişi de /api adreslerini oturumla açamaz.
+    assert panel.get("/api/mevzuat").status_code == 401
+    # İmza başlıkları panelin kendi adreslerinde geçmez, dış sistem sadece /api kullanır.
+    assert dis.get("/panel/api/kullanicilar", headers=imzala(anahtar, "GET", "/panel/api/kullanicilar")).status_code == 401
     with Session(engine) as s:
         assert s.scalar(select(Denetim).where(Denetim.islem == "api_imzasiz_istek")) is not None
 
@@ -121,16 +121,16 @@ def test_iptal_edilen_ve_imzasiz_uretilmis_anahtar_reddedilir(ortam):
     with Session(engine) as s:
         s.execute(update(ApiAnahtari).values(gizli=None))
         s.commit()
-    cevap = dis.get("/api/v1/konular", headers=imzala(anahtar, "GET", "/api/v1/konular"))
+    cevap = dis.get("/api/konular", headers=imzala(anahtar, "GET", "/api/konular"))
     assert cevap.status_code == 401 and "yeni anahtar" in cevap.json()["detail"]
-    csrf = panel.get("/api/oturum").json()["csrf"]
-    kayit_id = panel.get("/api/api-anahtarlari").json()["anahtarlar"][0]["id"]
-    panel.post(f"/api/api-anahtarlari/{kayit_id}/iptal", headers={"X-CSRF-Token": csrf})
-    cevap = dis.get("/api/v1/konular", headers=imzala(anahtar, "GET", "/api/v1/konular"))
+    csrf = panel.get("/panel/api/oturum").json()["csrf"]
+    kayit_id = panel.get("/panel/api/api-anahtarlari").json()["anahtarlar"][0]["id"]
+    panel.post(f"/panel/api/api-anahtarlari/{kayit_id}/iptal", headers={"X-CSRF-Token": csrf})
+    cevap = dis.get("/api/konular", headers=imzala(anahtar, "GET", "/api/konular"))
     assert cevap.status_code == 401 and "iptal" in cevap.json()["detail"]
     # Yanlış anahtarla atılan imza.
     sahte = anahtar[:10] + "x" * 33
-    assert dis.get("/api/v1/konular", headers=imzala(sahte, "GET", "/api/v1/konular")).status_code == 401
+    assert dis.get("/api/konular", headers=imzala(sahte, "GET", "/api/konular")).status_code == 401
     with Session(engine) as s:
         sebepler = {d.detay["sebep"] for d in s.scalars(select(Denetim).where(Denetim.islem == "api_imza_gecersiz"))}
     assert {"imzasiz_anahtar", "anahtar_yok"} <= sebepler
@@ -139,7 +139,7 @@ def test_iptal_edilen_ve_imzasiz_uretilmis_anahtar_reddedilir(ortam):
 def test_hiz_siniri(ortam, monkeypatch):
     _, dis, anahtar, _ = ortam
     monkeypatch.setattr(imza, "DAKIKA_SINIRI", 3)
-    kodlar = [dis.get("/api/v1/konular", headers=imzala(anahtar, "GET", "/api/v1/konular")).status_code
+    kodlar = [dis.get("/api/konular", headers=imzala(anahtar, "GET", "/api/konular")).status_code
               for _ in range(4)]
     assert kodlar == [200, 200, 200, 429]
 
@@ -148,8 +148,8 @@ def test_yeni_sekmede_acilan_adres_reddedilir(ortam):
     panel, _, _, _ = ortam
     sekme = {"Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
     # Giriş yapmış kişi panelin adresini yeni sekmede açar.
-    assert panel.get("/api/kullanicilar").status_code == 200
-    cevap = panel.get("/api/kullanicilar", headers=sekme)
+    assert panel.get("/panel/api/kullanicilar").status_code == 200
+    cevap = panel.get("/panel/api/kullanicilar", headers=sekme)
     assert cevap.status_code == 401 and "doğrudan açılamaz" in cevap.json()["detail"]
     # Doküman sayfası yeni sekmede açılır.
     assert panel.get("/api/dokuman", headers=sekme).status_code == 200
@@ -157,16 +157,20 @@ def test_yeni_sekmede_acilan_adres_reddedilir(ortam):
 
 def test_dokuman_imzali_istekle_gelir(ortam):
     panel, dis, anahtar, _ = ortam
-    csrf = panel.get("/api/oturum").json()["csrf"]
-    surum = panel.get("/api/ayarlar").json()["surum"]
-    panel.put("/api/ayarlar", json={"degisiklikler": {"dokuman_acik": False}, "surum": surum},
+    csrf = panel.get("/panel/api/oturum").json()["csrf"]
+    surum = panel.get("/panel/api/ayarlar").json()["surum"]
+    panel.put("/panel/api/ayarlar", json={"degisiklikler": {"dokuman_acik": False}, "surum": surum},
               headers={"X-CSRF-Token": csrf})
     assert dis.get("/api/dokuman/openapi.json").status_code == 401
     cevap = dis.get("/api/dokuman/openapi.json", headers=imzala(anahtar, "GET", "/api/dokuman/openapi.json"))
-    assert cevap.status_code == 200 and "/api/v1/mevzuat" in cevap.json()["paths"]
+    assert cevap.status_code == 200 and "/api/mevzuat" in cevap.json()["paths"]
+    # Panelde giriş yapmış admin kapalı dokümanı imzasız açar, doküman /api altında ama imza istemez.
+    assert panel.get("/api/dokuman/openapi.json").status_code == 200
+    # Eski /api/v1 adresleri artık yok.
+    assert dis.get("/api/v1/mevzuat", headers=imzala(anahtar, "GET", "/api/v1/mevzuat")).status_code == 404
 
 
-def test_panelin_butun_islemleri_v1_de(ortam):
+def test_panelin_butun_islemleri_api_de(ortam):
     _, dis, anahtar, _ = ortam
 
     def al(adres):
@@ -174,21 +178,21 @@ def test_panelin_butun_islemleri_v1_de(ortam):
         assert cevap.status_code == 200, (adres, cevap.text)
         return cevap.json()
 
-    assert [k["eposta"] for k in al("/api/v1/kullanicilar")["kullanicilar"]] == ["admin@firma.com"]
-    ayarlar = {a["ad"]: a for a in al("/api/v1/ayarlar")["alanlar"]}
+    assert [k["eposta"] for k in al("/api/kullanicilar")["kullanicilar"]] == ["admin@firma.com"]
+    ayarlar = {a["ad"]: a for a in al("/api/ayarlar")["alanlar"]}
     assert ayarlar["smtp_sifre"]["deger"] is None and ayarlar["api_imza"]["deger"] is True
-    assert "api_istegi" in al("/api/v1/denetim")["islemler"]
+    assert "api_istegi" in al("/api/denetim")["islemler"]
     # Konu eklenir, geçmişinde eklenme satırı görünür.
     govde = _govde({"ad": "Gümrük", "is_kollari": ["Ortak"], "kelimeler": ["gümrük"], "haric": [], "dislanan": [],
                     "aciklama": ""})
-    cevap = dis.post("/api/v1/konular", content=govde,
-                     headers={**imzala(anahtar, "POST", "/api/v1/konular", govde), "Content-Type": "application/json"})
+    cevap = dis.post("/api/konular", content=govde,
+                     headers={**imzala(anahtar, "POST", "/api/konular", govde), "Content-Type": "application/json"})
     assert cevap.status_code == 200, cevap.text
-    gecmis = al(f"/api/v1/konular/{cevap.json()['id']}/gecmis")["gecmis"]
+    gecmis = al(f"/api/konular/{cevap.json()['id']}/gecmis")["gecmis"]
     assert len(gecmis) == 1 and gecmis[0]["kim"] == "API: Şirket portalı"
     # Mail ayarı yokken deneme maili hata mesajı döner, kayıt değişmez.
     govde = _govde({"adres": "bilgi@firma.com"})
-    cevap = dis.post("/api/v1/ayarlar/mail-dene", content=govde,
-                     headers={**imzala(anahtar, "POST", "/api/v1/ayarlar/mail-dene", govde),
+    cevap = dis.post("/api/ayarlar/mail-dene", content=govde,
+                     headers={**imzala(anahtar, "POST", "/api/ayarlar/mail-dene", govde),
                               "Content-Type": "application/json"})
     assert cevap.status_code == 200 and cevap.json()["tur"] == "hata"

@@ -79,7 +79,7 @@ AYAR_ROLLERI = ("admin", "onaylayici", TAM_ROL)  # kaynak/konu yönetimi, asıl 
 KURTARMA_ROLLERI = ("admin", TAM_ROL)
 API_ROLU = "api"  # panele girer ama sadece API dokümanını görür, istek atmak için API anahtarı gerekir
 # API kullanıcısının oturumla erişebildiği adresler, gerisi API anahtarı ister.
-API_ROLU_ADRESLERI = ("/api/menu", "/api/dokuman/openapi.json", "/api/dokuman/indir", "/api/parolam")
+API_ROLU_ADRESLERI = ("/panel/api/menu", "/api/dokuman/openapi.json", "/api/dokuman/indir", "/panel/api/parolam")
 # Dokümandaki Authorize penceresinde görünen açıklama.
 IMZA_ACIKLAMASI = (
     "API anahtarınızı girin. Bu sayfa anahtarı göndermez, her isteği onunla imzalar.\n\n"
@@ -88,12 +88,15 @@ IMZA_ACIKLAMASI = (
     "- `X-Zaman`: şimdiki zaman, Unix saniyesi\n"
     "- `X-Numara`: her istekte yeni, 16-64 karakter rastgele değer (harf, rakam, - ve _)\n"
     "- `X-Imza`: aşağıdaki metnin anahtarla HMAC-SHA256 özeti, küçük harf hex\n\n"
-    "İmzalanan metin, satırlar \\n ile birleşir: yöntem (GET), adres (/api/v1/mevzuat), sorgu (q=altin&sayfa=1, "
+    "İmzalanan metin, satırlar \\n ile birleşir: yöntem (GET), adres (/api/mevzuat), sorgu (q=altin&sayfa=1, "
     "yoksa boş), X-Zaman, X-Numara, gövdenin SHA-256 özeti (küçük harf hex, gövde yoksa boş metnin özeti).\n\n"
     "Aynı numara ikinci kez kabul edilmez, 5 dakikadan eski istek kabul edilmez, anahtar başına dakikada en fazla 300 istek."
 )
-# Dış sistemlerin adresleri bununla başlar.
-SURUMLU_ON_EK = "/api/v1/"
+# Dış sistemlerin adresleri bununla başlar. Panelin kendi arayüzünün adresleri /panel/api altında.
+DIS_ON_EK = "/api/"
+PANEL_ON_EK = "/panel/api"
+# Doküman adresleri, /api altında ama imza istemez, panel oturumuyla da açılır.
+DOKUMAN_ADRESLERI = ("/api/dokuman", "/api/dokuman/openapi.json", "/api/dokuman/indir")
 # Tarayıcıda yeni sekmede açılabilen adresler, doküman sayfası ve indirilen doküman. Diğer API adresleri açılmaz.
 TARAYICIDA_ACILANLAR = ("/api/dokuman", "/api/dokuman/indir")
 # Dış sistemlerin API anahtarını gönderdiği başlık.
@@ -425,8 +428,8 @@ def uygulama_olustur(
         # API anahtarıyla gelen istek çerezle değil anahtarla tanınır. Başka bir site tarayıcıdan bu başlığı koyamaz.
         if istek_anahtari(request):
             return
-        # İmzalı istek de çerezle tanınmaz, imzası /api/v1 adreslerinde ayrıca doğrulanır.
-        if imza.imzali_mi(request.headers) and request.url.path.startswith(SURUMLU_ON_EK):
+        # İmzalı istek de çerezle tanınmaz, imzası /api adreslerinde ayrıca doğrulanır.
+        if imza.imzali_mi(request.headers) and request.url.path.startswith(DIS_ON_EK):
             return
         beklenen = request.session.get("csrf")
         gelen = request.headers.get("x-csrf-token", "")
@@ -465,8 +468,9 @@ def uygulama_olustur(
                 raise HTTPException(401, "API anahtarı doğrudan gönderilemez, istek anahtarla imzalanmalı (HMAC). "
                                          "Nasıl imzalanacağı API dokümanındaki Authorize penceresinde.")
             return api_anahtari_gerekli(request, db, anahtar)
-        # İmza zorunluyken /api/v1 adresleri panel oturumuyla da açılmaz, sadece imzalı istekle.
-        if request.url.path.startswith(SURUMLU_ON_EK) and ayar(db).api_imza:
+        # İmza zorunluyken /api adresleri panel oturumuyla da açılmaz, sadece imzalı istekle. Doküman bunun dışında.
+        yol = request.url.path
+        if yol.startswith(DIS_ON_EK) and yol not in DOKUMAN_ADRESLERI and ayar(db).api_imza:
             raise HTTPException(401, "Bu adres imzalı istek ister (X-Anahtar, X-Zaman, X-Numara, X-Imza).")
         kullanici = oturum_kullanicisi(request, db)
         if kullanici is None:
@@ -554,8 +558,10 @@ def uygulama_olustur(
 
     # API anahtarının iki biçimi dokümanda "Authorize" düğmesi olarak görünür, kontrolü giris_gerekli yapar.
     anahtar_semalari = [Security(HTTPBearer(auto_error=False, description=IMZA_ACIKLAMASI))]
-    # Bütün /api adreslerinin grubu, her istekte önce CSRF kontrolü çalışır.
-    api = APIRouter(prefix="/api", dependencies=[Depends(csrf_dogrula), *anahtar_semalari])
+    # Panel arayüzünün adresleri (/panel/api), her istekte önce CSRF kontrolü çalışır.
+    api = APIRouter(prefix=PANEL_ON_EK, dependencies=[Depends(csrf_dogrula), *anahtar_semalari])
+    # API dokümanının adresleri (/api/dokuman), dış sistemlerin adresleriyle aynı yerde.
+    dokuman_yolu = APIRouter(prefix="/api", dependencies=[Depends(csrf_dogrula)])
 
     # --- oturum, giriş, çıkış
 
@@ -1421,7 +1427,7 @@ def uygulama_olustur(
     # İndirilen dokümana panel adresi sunucu adresi olarak yazılır (Postman ve bilgisayardan açılan HTML istekleri oraya atar).
     # Sayfadaki doküman zaten bu sunucudan açıldığı için adres yazılmaz, istekler sayfanın adresine gider.
     def openapi_semasi(db: Session, sunucu_adresli: bool = False) -> dict:
-        # Dokümanda sadece dış sistemlerin adresleri (/api/v1) var, panelin kendi adresleri yok.
+        # Dokümanda sadece dış sistemlerin adresleri (/api) var, panelin kendi adresleri yok.
         sema = get_openapi(title="Mevzuat Takip API", version="1.0", routes=portal_yolu.routes,
                            tags=panel_belgesi.ETIKETLER)
         adres = ayar(db).panel_adresi
@@ -1438,7 +1444,7 @@ def uygulama_olustur(
         if not anahtarla_mi(request) and kullanici.rol not in DOKUMAN_ROLLERI:
             raise HTTPException(403, "API dokümanına erişim yetkiniz yok.")
 
-    @api.get("/dokuman/openapi.json", include_in_schema=False, dependencies=[Depends(imza_kontrol)])
+    @dokuman_yolu.get("/dokuman/openapi.json", include_in_schema=False, dependencies=[Depends(imza_kontrol)])
     def openapi_tanimi(request: Request):
         with Oturum() as db:
             dokuman_gerekli(request, db)
@@ -1446,12 +1452,12 @@ def uygulama_olustur(
 
     # Swagger sayfasının kabuğu herkese açılır, içinde veri yoktur. Doküman açıksa (varsayılan) Swagger doğrudan gelir,
     # kapalıysa sayfa API anahtarı ister ve doküman (openapi.json) ancak oturumla ya da geçerli anahtarla gelir.
-    @api.get("/dokuman", include_in_schema=False)
+    @dokuman_yolu.get("/dokuman", include_in_schema=False)
     def api_dokumani():
         return HTMLResponse(SWAGGER_SAYFASI)
 
     # Dokümanı dosya olarak verir. html, internet ve giriş gerektirmeden açılan tek dosya. json, Postman gibi araçlara yüklenir.
-    @api.get("/dokuman/indir", include_in_schema=False, dependencies=[Depends(imza_kontrol)])
+    @dokuman_yolu.get("/dokuman/indir", include_in_schema=False, dependencies=[Depends(imza_kontrol)])
     def api_dokumani_indir(request: Request, bicim: Literal["html", "json"] = "html"):
         with Oturum() as db:
             dokuman_gerekli(request, db)
@@ -1465,19 +1471,20 @@ def uygulama_olustur(
         return Response(_tek_dosya_dokuman(sema, klasor), media_type="text/html; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="mevzuat-api-{tarih}.html"'})
 
-    # Sürümlü adresler (/api/v1), portal bunları kullanır. Mevzuat okuma kendi fonksiyonlarıyla, onay, tarama, kaynak,
+    # Dış sistemlerin adresleri (/api), portal bunları kullanır. Mevzuat okuma kendi fonksiyonlarıyla, onay, tarama, kaynak,
     # konu ve alıcı grubu panelin aynı fonksiyonlarıyla ama sabit cevap biçimiyle (web/portal.py).
     portal_yolu = portal.portal_api(Oturum, giris_gerekli, [Depends(csrf_dogrula), Depends(imza_kontrol),
                                                              *anahtar_semalari])
     surumlu = portal.yazma_adreslerini_ekle(portal_yolu, api.routes, panel_belgesi.BELGE, API_GRUPLARI)
-    # Her uç noktanın başlığı, açıklaması, yetkisi ve hata cevapları (web/panel_belgesi.py). v1'e açılan panel adresleri
-    # dokümanda tekrar görünmez, panel onları kullanmaya devam eder.
+    # Her uç noktanın başlığı, açıklaması, yetkisi ve hata cevapları (web/panel_belgesi.py). dış adreslere açılan panel
+    # adresleri dokümanda tekrar görünmez, panel onları kullanmaya devam eder.
     panel_belgesi.belgele(api.routes, gizli=surumlu)
     # Dokümanda uç noktalar adreslerine göre gruplanır.
     for yol in api.routes:
         if isinstance(yol, APIRoute):
-            yol.tags = [API_GRUPLARI.get(yol.path.split("/")[2], "Diğer")]
-    # API adreslerini uygulamaya ekle. Portal önce, /api/{...} genel adresi ona da 404 vermesin.
+            yol.tags = [API_GRUPLARI.get(yol.path.removeprefix(PANEL_ON_EK).split("/")[1], "Diğer")]
+    # API adreslerini uygulamaya ekle. Doküman önce, /api/{...} adresleriyle karışmasın.
+    app.include_router(dokuman_yolu)
     app.include_router(portal_yolu)
     app.include_router(api)
 
@@ -1488,8 +1495,9 @@ def uygulama_olustur(
     def saglik() -> str:
         return "ok"
 
-    # Bilinmeyen /api adresine 404.
+    # Bilinmeyen /api ve /panel/api adresine 404.
     @app.get("/api/{yol:path}", include_in_schema=False)
+    @app.get("/panel/api/{yol:path}", include_in_schema=False)
     def api_bulunamadi(yol: str):
         return JSONResponse({"detail": "Bulunamadı."}, status_code=404)
 
