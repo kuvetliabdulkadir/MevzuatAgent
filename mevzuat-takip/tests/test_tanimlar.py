@@ -124,16 +124,16 @@ def test_panel_is_kolu_listesi_her_istekte_dbden(tmp_path):
         tanimlar.tohumla(s, KAYNAKLAR, KONULAR)
         kullanici_ekle(s, "sorumlu@firma.com", "Sorumlu", "onaylayici", "dogru-parola-123")
     client = TestClient(uygulama_olustur(engine, None, None, "t" * 40, ek_ekle=False, arayuz=None))
-    csrf = client.get("/api/oturum").json()["csrf"]
-    client.post("/api/giris", json={"eposta": "sorumlu@firma.com", "parola": "dogru-parola-123"},
+    csrf = client.get("/panel/api/oturum").json()["csrf"]
+    client.post("/panel/api/giris", json={"eposta": "sorumlu@firma.com", "parola": "dogru-parola-123"},
                 headers={"X-CSRF-Token": csrf})
-    assert "Gümrük" not in client.get("/api/gruplar").json()["is_kollari"]
+    assert "Gümrük" not in client.get("/panel/api/gruplar").json()["is_kollari"]
 
     with Session(engine) as s:
         s.add(KonuTanimi(ad="Gümrük", is_kollari=["Gümrük"], kelimeler=["gümrük"], haric=[], dislanan=[],
                          aktif=True, surum=1, guncelleme=datetime.now()))
         s.commit()
-    assert "Gümrük" in client.get("/api/gruplar").json()["is_kollari"]  # yeniden başlatmadan
+    assert "Gümrük" in client.get("/panel/api/gruplar").json()["is_kollari"]  # yeniden başlatmadan
 
 
 def test_panel_ayardan_kurulur_ve_tanimlari_aktarir(tmp_path, monkeypatch):

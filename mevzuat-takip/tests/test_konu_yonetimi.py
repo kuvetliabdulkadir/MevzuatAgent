@@ -52,17 +52,17 @@ def ortam(izlenen):
         ])
         s.commit()
     client = TestClient(uygulama_olustur(engine, None, None, "t" * 40, ek_ekle=False, arayuz=None))
-    _istek(client, "post", "/api/giris", {"eposta": "sorumlu@firma.com", "parola": PAROLA})
+    _istek(client, "post", "/panel/api/giris", {"eposta": "sorumlu@firma.com", "parola": PAROLA})
     return client, engine
 
 
 def _istek(client, yontem, yol, veri=None):
-    csrf = client.get("/api/oturum").json()["csrf"]
+    csrf = client.get("/panel/api/oturum").json()["csrf"]
     return client.request(yontem, yol, json=veri, headers={"X-CSRF-Token": csrf})
 
 
 def _konu(client, ad):
-    return next(k for k in client.get("/api/konular").json()["konular"] if k["ad"] == ad)
+    return next(k for k in client.get("/panel/api/konular").json()["konular"] if k["ad"] == ad)
 
 
 def _form(konu: dict, **degisiklik) -> dict:
@@ -73,7 +73,7 @@ def _form(konu: dict, **degisiklik) -> dict:
 
 def test_liste_90_gunluk_eslesme_ve_kullanim(ortam):
     client, _ = ortam
-    cevap = client.get("/api/konular").json()
+    cevap = client.get("/panel/api/konular").json()
     kuyum = next(k for k in cevap["konular"] if k["ad"] == KUYUM)
     assert kuyum["eslesme_90"] == 2  # 200 gün önceki sayılmaz
     assert kuyum["kullanim"] == {"kaynaklar": [], "izlenen": True}
@@ -86,7 +86,7 @@ def test_onizleme_eslesecek_ve_dusecek_basliklar(ortam):
     client, engine = ortam
     kuyum = _konu(client, KUYUM)
     kelimeler = [k for k in kuyum["kelimeler"] if k != "ziynet"] + ["sarrafiye", "ab"]
-    cevap = _istek(client, "post", "/api/konular/onizleme", {**_form(kuyum, kelimeler=kelimeler), "id": kuyum["id"]})
+    cevap = _istek(client, "post", "/panel/api/konular/onizleme", {**_form(kuyum, kelimeler=kelimeler), "id": kuyum["id"]})
     assert cevap.status_code == 200, cevap.text
     sonuc = cevap.json()
     assert [s["baslik"] for s in sonuc["eslesecek"]] == ["Sarrafiye Basımına İlişkin Karar"]
@@ -102,32 +102,32 @@ def test_uyari_sadece_yeni_eklenen_kelime_icin(ortam):
     """Tarayıcı denemesinde görüldü: Vergi'deki mevcut "kdv"/"ötv" her düzenlemede uyarı veriyordu."""
     client, _ = ortam
     vergi = _konu(client, "Vergi")
-    sonuc = _istek(client, "post", "/api/konular/onizleme",
+    sonuc = _istek(client, "post", "/panel/api/konular/onizleme",
                    {**_form(vergi, kelimeler=[*vergi["kelimeler"], "noterlik"]), "id": vergi["id"]}).json()
     assert sonuc["uyarilar"] == []
-    sonuc = _istek(client, "post", "/api/konular/onizleme",
+    sonuc = _istek(client, "post", "/panel/api/konular/onizleme",
                    {**_form(vergi, kelimeler=[*vergi["kelimeler"], "tv", "altın"]), "id": vergi["id"]}).json()
     assert any("Kısa kelime (tv)" in u for u in sonuc["uyarilar"]) and any(KUYUM in u for u in sonuc["uyarilar"])
 
 
 def test_ayni_kelime_iki_konuda_uyarisi(ortam):
     client, _ = ortam
-    cevap = _istek(client, "post", "/api/konular/onizleme",
+    cevap = _istek(client, "post", "/panel/api/konular/onizleme",
                    {"ad": "Yeni", "is_kollari": ["Ortak"], "kelimeler": ["Altın", "gümrük"], "haric": [], "dislanan": []})
     assert any(KUYUM in u and "altın" in u for u in cevap.json()["uyarilar"])
 
 
 def test_ekle_duzenle_denetime_yazilir_tarama_dbden_okur(ortam):
     client, engine = ortam
-    cevap = _istek(client, "post", "/api/konular", {"ad": "  Gümrük  ", "is_kollari": ["Ortak", "Ortak"],
+    cevap = _istek(client, "post", "/panel/api/konular", {"ad": "  Gümrük  ", "is_kollari": ["Ortak", "Ortak"],
                                                     "kelimeler": ["Gümrük", "gümrük", " antrepo "], "haric": [],
                                                     "dislanan": []})
     assert cevap.status_code == 200, cevap.text
     yeni = cevap.json()
     assert yeni["ad"] == "Gümrük" and yeni["kelimeler"] == ["Gümrük", "antrepo"] and yeni["is_kollari"] == ["Ortak"]
-    cevap = _istek(client, "put", f"/api/konular/{yeni['id']}", _form(yeni, kelimeler=["gümrük", "antrepo", "transit"]))
+    cevap = _istek(client, "put", f"/panel/api/konular/{yeni['id']}", _form(yeni, kelimeler=["gümrük", "antrepo", "transit"]))
     assert cevap.status_code == 200 and cevap.json()["surum"] == 2
-    assert _istek(client, "put", f"/api/konular/{yeni['id']}", _form(yeni)).status_code == 409  # eski sürüm
+    assert _istek(client, "put", f"/panel/api/konular/{yeni['id']}", _form(yeni)).status_code == 409  # eski sürüm
     with Session(engine) as s:
         gumruk = next(k for k in tanimlar.konulari_oku(s) if k.ad == "Gümrük")
         assert gumruk.kelimeler == ("gümrük", "antrepo", "transit")
@@ -140,11 +140,11 @@ def test_aciklama_kaydedilir_sadelesir_rapora_gider(ortam):
     masak = _konu(client, MASAK)
     assert masak["aciklama"] == ""
     yazi = "  Kuyumcular   5549 sayılı Kanunda yükümlüdür.\n\n Eşik değişiklikleri doğrudan uygulanır.  "
-    cevap = _istek(client, "put", f"/api/konular/{masak['id']}", _form(masak, aciklama=yazi))
+    cevap = _istek(client, "put", f"/panel/api/konular/{masak['id']}", _form(masak, aciklama=yazi))
     assert cevap.status_code == 200, cevap.text
     assert cevap.json()["aciklama"] == "Kuyumcular 5549 sayılı Kanunda yükümlüdür.\n\nEşik değişiklikleri doğrudan uygulanır."
     # Yeniden adlandırılınca eski adla eşleşmiş kayıtlar da aynı açıklamayı alır.
-    _istek(client, "put", f"/api/konular/{masak['id']}", _form(_konu(client, MASAK), ad="MASAK"))
+    _istek(client, "put", f"/panel/api/konular/{masak['id']}", _form(_konu(client, MASAK), ad="MASAK"))
     with Session(engine) as s:
         aciklamalar = rapor.konu_aciklamalari(s)
     assert aciklamalar[MASAK] == aciklamalar["MASAK"] and aciklamalar[MASAK].startswith("Kuyumcular")
@@ -154,7 +154,7 @@ def test_aciklama_kaydedilir_sadelesir_rapora_gider(ortam):
 def test_cok_uzun_aciklama_kaydedilmez(ortam):
     client, _ = ortam
     vergi = _konu(client, "Vergi")
-    cevap = _istek(client, "put", f"/api/konular/{vergi['id']}", _form(vergi, aciklama="a" * 1001))
+    cevap = _istek(client, "put", f"/panel/api/konular/{vergi['id']}", _form(vergi, aciklama="a" * 1001))
     assert cevap.status_code == 400 and "1000 karakter" in cevap.json()["detail"]
 
 
@@ -166,16 +166,16 @@ def test_cok_uzun_aciklama_kaydedilmez(ortam):
 ])
 def test_hatali_konu_kaydedilmez(ortam, govde, hata):
     client, _ = ortam
-    cevap = _istek(client, "post", "/api/konular", {"haric": [], "dislanan": [], **govde})
+    cevap = _istek(client, "post", "/panel/api/konular", {"haric": [], "dislanan": [], **govde})
     assert cevap.status_code == 400 and hata in cevap.json()["detail"]
 
 
 def test_yeniden_adlandirma_kaynaklari_ve_takip_listesini_bozmaz(ortam, izlenen):
     client, engine = ortam
     masak = _konu(client, MASAK)
-    assert _istek(client, "put", f"/api/konular/{masak['id']}", _form(masak, ad="MASAK ve yaptırımlar")).status_code == 200
+    assert _istek(client, "put", f"/panel/api/konular/{masak['id']}", _form(masak, ad="MASAK ve yaptırımlar")).status_code == 200
     kuyum = _konu(client, KUYUM)
-    cevap = _istek(client, "put", f"/api/konular/{kuyum['id']}", _form(kuyum, ad="Kuyumculuk"))
+    cevap = _istek(client, "put", f"/panel/api/konular/{kuyum['id']}", _form(kuyum, ad="Kuyumculuk"))
     assert cevap.status_code == 200 and cevap.json()["eski_adlar"] == [KUYUM]
     assert cevap.json()["eslesme_90"] == 2  # eski adla eşleşen kayıtlar da sayılır
     assert cevap.json()["kullanim"]["izlenen"]  # takip listesi eski adı kullanıyor, yine bağlı
@@ -188,34 +188,34 @@ def test_yeniden_adlandirma_kaynaklari_ve_takip_listesini_bozmaz(ortam, izlenen)
     pipeline.ayarlari_dogrula(kaynaklar, konular, izlenenler)  # gece taraması başlar
 
     # Eski ad yeni bir konuya verilemez (takip listesi karışmasın); geri dönmek serbest.
-    assert "başka bir konuda" in _istek(client, "post", "/api/konular",
+    assert "başka bir konuda" in _istek(client, "post", "/panel/api/konular",
                                         {"ad": KUYUM, "is_kollari": ["Kuyum"], "kelimeler": ["x"]}).json()["detail"]
     kuyum = _konu(client, "Kuyumculuk")
-    cevap = _istek(client, "put", f"/api/konular/{kuyum['id']}", _form(kuyum, ad=KUYUM))
+    cevap = _istek(client, "put", f"/panel/api/konular/{kuyum['id']}", _form(kuyum, ad=KUYUM))
     assert cevap.status_code == 200 and cevap.json()["eski_adlar"] == ["Kuyumculuk"]
 
 
 def test_kullanilan_konu_pasiflesmez_kullanilmayan_pasiflesir_ve_geri_gelir(ortam):
     client, engine = ortam
     masak, kuyum = _konu(client, MASAK), _konu(client, KUYUM)
-    cevap = _istek(client, "post", f"/api/konular/{masak['id']}/pasif", {"surum": masak["surum"]})
+    cevap = _istek(client, "post", f"/panel/api/konular/{masak['id']}/pasif", {"surum": masak["surum"]})
     assert cevap.status_code == 400 and "MASAK Duyurusu" in cevap.json()["detail"]
-    cevap = _istek(client, "post", f"/api/konular/{kuyum['id']}/pasif", {"surum": kuyum["surum"]})
+    cevap = _istek(client, "post", f"/panel/api/konular/{kuyum['id']}/pasif", {"surum": kuyum["surum"]})
     assert cevap.status_code == 400 and "izlenen_mevzuat.toml" in cevap.json()["detail"]
 
     kisisel = _konu(client, "Kişisel veriler")
-    assert _istek(client, "post", f"/api/konular/{kisisel['id']}/pasif", {"surum": kisisel["surum"]}).status_code == 200
+    assert _istek(client, "post", f"/panel/api/konular/{kisisel['id']}/pasif", {"surum": kisisel["surum"]}).status_code == 200
     with Session(engine) as s:
         assert "Kişisel veriler" not in [k.ad for k in tanimlar.konulari_oku(s)]
     kisisel = _konu(client, "Kişisel veriler")
     assert not kisisel["aktif"]
-    assert _istek(client, "post", f"/api/konular/{kisisel['id']}/aktif", {"surum": kisisel["surum"]}).status_code == 200
+    assert _istek(client, "post", f"/panel/api/konular/{kisisel['id']}/aktif", {"surum": kisisel["surum"]}).status_code == 200
     with Session(engine) as s:
         assert "Kişisel veriler" in [k.ad for k in tanimlar.konulari_oku(s)]
 
 
 def test_girissiz_reddedilir(ortam):
     client, _ = ortam
-    _istek(client, "post", "/api/cikis")
-    assert client.get("/api/konular").status_code == 401
-    assert _istek(client, "post", "/api/konular/onizleme", {"ad": "x", "kelimeler": ["x"]}).status_code == 401
+    _istek(client, "post", "/panel/api/cikis")
+    assert client.get("/panel/api/konular").status_code == 401
+    assert _istek(client, "post", "/panel/api/konular/onizleme", {"ad": "x", "kelimeler": ["x"]}).status_code == 401

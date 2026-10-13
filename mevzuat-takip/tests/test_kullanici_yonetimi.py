@@ -55,11 +55,11 @@ def _istemci(engine, posta, panel_adresi=PANEL):
 
 
 def _post(c, yol, veri=None):
-    return c.post(yol, json=veri or {}, headers={"X-CSRF-Token": c.get("/api/oturum").json()["csrf"]})
+    return c.post(yol, json=veri or {}, headers={"X-CSRF-Token": c.get("/panel/api/oturum").json()["csrf"]})
 
 
 def _giris(c, eposta, parola=PAROLA):
-    return _post(c, "/api/giris", {"eposta": eposta, "parola": parola})
+    return _post(c, "/panel/api/giris", {"eposta": eposta, "parola": parola})
 
 
 @pytest.fixture
@@ -75,7 +75,7 @@ def _kullanici(engine, eposta) -> Kullanici:
 
 
 def test_davet_ile_yeni_kullanici_parolasini_kendisi_belirler(engine, posta, admin):
-    cevap = _post(admin, "/api/kullanicilar", {"eposta": "Yeni@Firma.com", "ad": " Veli  Yeni ", "rol": "onaylayici"})
+    cevap = _post(admin, "/panel/api/kullanicilar", {"eposta": "Yeni@Firma.com", "ad": " Veli  Yeni ", "rol": "onaylayici"})
     assert cevap.status_code == 200 and cevap.json()["mesaj"]["tur"] == "basari", cevap.text
     yeni = next(k for k in cevap.json()["kullanicilar"] if k["eposta"] == "yeni@firma.com")
     assert yeni["ad"] == "Veli Yeni" and yeni["davet_bekliyor"] and yeni["aktif"]
@@ -87,11 +87,11 @@ def test_davet_ile_yeni_kullanici_parolasini_kendisi_belirler(engine, posta, adm
 
     c = _istemci(engine, posta)
     assert _giris(c, "yeni@firma.com", "bilinmiyor-123456").status_code == 400  # davetle parola belirlenmeden
-    kontrol = _post(c, "/api/parola-linki/kontrol", {"token": token})
+    kontrol = _post(c, "/panel/api/parola-linki/kontrol", {"token": token})
     assert kontrol.json() == {"eposta": "yeni@firma.com", "ad": "Veli Yeni", "tur": "davet"}
-    assert _post(c, "/api/parola-linki/kullan", {"token": token, "parola": "kisa"}).status_code == 400
-    assert _post(c, "/api/parola-linki/kullan", {"token": token, "parola": YENI}).status_code == 200
-    assert _post(c, "/api/parola-linki/kullan", {"token": token, "parola": YENI}).status_code == 400  # tek kullanım
+    assert _post(c, "/panel/api/parola-linki/kullan", {"token": token, "parola": "kisa"}).status_code == 400
+    assert _post(c, "/panel/api/parola-linki/kullan", {"token": token, "parola": YENI}).status_code == 200
+    assert _post(c, "/panel/api/parola-linki/kullan", {"token": token, "parola": YENI}).status_code == 400  # tek kullanım
     assert _giris(c, "yeni@firma.com", YENI).json()["sonraki"] == "panel"
     with Session(engine) as s:
         assert s.scalar(select(ParolaLinki.ozet)) != token  # link DB'de açık durmaz
@@ -100,22 +100,22 @@ def test_davet_ile_yeni_kullanici_parolasini_kendisi_belirler(engine, posta, adm
 def test_sifirlama_linki_eski_linki_iptal_eder_ve_oturumlari_kapatir(engine, posta, admin):
     onay = _istemci(engine, posta)
     _giris(onay, "onay@firma.com")
-    assert onay.get("/api/raporlar").status_code == 200
+    assert onay.get("/panel/api/raporlar").status_code == 200
     with Session(engine) as s:  # onaylayıcı daha önce giriş yaptı: link "sıfırlama" olur
         assert s.get(Kullanici, _kullanici(engine, "onay@firma.com").id).son_giris is not None
     oid = _kullanici(engine, "onay@firma.com").id
 
-    _post(admin, f"/api/kullanicilar/{oid}/parola-linki")
+    _post(admin, f"/panel/api/kullanicilar/{oid}/parola-linki")
     ilk = posta.son_link()
-    cevap = _post(admin, f"/api/kullanicilar/{oid}/parola-linki")
+    cevap = _post(admin, f"/panel/api/kullanicilar/{oid}/parola-linki")
     assert cevap.json()["mesaj"]["tur"] == "basari" and "sıfırlama" in posta.giden[-1].konu
     ikinci = posta.son_link()
 
     c = _istemci(engine, posta)
-    assert _post(c, "/api/parola-linki/kontrol", {"token": ilk}).status_code == 400  # yenisi gidince eskisi geçersiz
+    assert _post(c, "/panel/api/parola-linki/kontrol", {"token": ilk}).status_code == 400  # yenisi gidince eskisi geçersiz
     assert _giris(onay, "onay@firma.com").status_code == 200  # eski parola link kullanılana kadar geçerli
-    assert _post(c, "/api/parola-linki/kullan", {"token": ikinci, "parola": YENI}).status_code == 200
-    assert onay.get("/api/raporlar").status_code == 401  # açık oturum kapandı
+    assert _post(c, "/panel/api/parola-linki/kullan", {"token": ikinci, "parola": YENI}).status_code == 200
+    assert onay.get("/panel/api/raporlar").status_code == 401  # açık oturum kapandı
     assert _giris(c, "onay@firma.com", PAROLA).status_code == 400
     assert _giris(c, "onay@firma.com", YENI).status_code == 200
 
@@ -135,18 +135,18 @@ def test_pasiflestirme_kurallari(engine, posta, admin):
     oid, aid = _kullanici(engine, "onay@firma.com").id, _kullanici(engine, "admin@firma.com").id
     onay = _istemci(engine, posta)
     _giris(onay, "onay@firma.com")
-    _post(admin, f"/api/kullanicilar/{oid}/parola-linki")
+    _post(admin, f"/panel/api/kullanicilar/{oid}/parola-linki")
     token = posta.son_link()
 
-    assert _post(admin, f"/api/kullanicilar/{oid}/aktiflik", {"aktif": False}).status_code == 200
-    assert onay.get("/api/raporlar").status_code == 401  # açık oturumu bitti
+    assert _post(admin, f"/panel/api/kullanicilar/{oid}/aktiflik", {"aktif": False}).status_code == 200
+    assert onay.get("/panel/api/raporlar").status_code == 401  # açık oturumu bitti
     assert _giris(onay, "onay@firma.com").status_code == 400
-    assert _post(onay, "/api/parola-linki/kontrol", {"token": token}).status_code == 400  # bekleyen link de iptal
-    assert _post(admin, f"/api/kullanicilar/{oid}/parola-linki").status_code == 400
+    assert _post(onay, "/panel/api/parola-linki/kontrol", {"token": token}).status_code == 400  # bekleyen link de iptal
+    assert _post(admin, f"/panel/api/kullanicilar/{oid}/parola-linki").status_code == 400
 
-    cevap = _post(admin, f"/api/kullanicilar/{aid}/aktiflik", {"aktif": False})
+    cevap = _post(admin, f"/panel/api/kullanicilar/{aid}/aktiflik", {"aktif": False})
     assert cevap.status_code == 400 and "Kendi hesabınızı" in cevap.json()["detail"]
-    assert _post(admin, f"/api/kullanicilar/{oid}/aktiflik", {"aktif": True}).status_code == 200
+    assert _post(admin, f"/panel/api/kullanicilar/{oid}/aktiflik", {"aktif": True}).status_code == 200
     assert _giris(onay, "onay@firma.com").status_code == 200
 
 
@@ -162,9 +162,9 @@ def test_son_aktif_admin_pasiflestirilemez(engine):
 def test_onaylayici_kullanici_yonetemez_ve_denetimi_goremez(engine, posta):
     c = _istemci(engine, posta)
     _giris(c, "onay@firma.com")
-    assert c.get("/api/kullanicilar").status_code == 403
-    assert c.get("/api/denetim").status_code == 403
-    assert _post(c, "/api/kullanicilar", {"eposta": "x@firma.com", "ad": "X", "rol": "admin"}).status_code == 403
+    assert c.get("/panel/api/kullanicilar").status_code == 403
+    assert c.get("/panel/api/denetim").status_code == 403
+    assert _post(c, "/panel/api/kullanicilar", {"eposta": "x@firma.com", "ad": "X", "rol": "admin"}).status_code == 403
     with Session(engine) as s:
         assert s.scalar(select(Denetim).where(Denetim.islem == "yetkisiz_yonetim_denemesi")) is not None
         assert guvenlik.kullanici_bul(s, "x@firma.com") is None
@@ -173,7 +173,7 @@ def test_onaylayici_kullanici_yonetemez_ve_denetimi_goremez(engine, posta):
 def test_panel_adresi_yoksa_ve_mail_gitmezse(engine, posta):
     c = _istemci(engine, posta, panel_adresi=None)
     _giris(c, "admin@firma.com")
-    cevap = _post(c, "/api/kullanicilar", {"eposta": "y@firma.com", "ad": "Y", "rol": "onaylayici"})
+    cevap = _post(c, "/panel/api/kullanicilar", {"eposta": "y@firma.com", "ad": "Y", "rol": "onaylayici"})
     assert cevap.json()["mesaj"]["tur"] == "hata" and "Panel adresi tanımlı değil" in cevap.json()["mesaj"]["mesaj"]
     assert posta.giden == []
 
@@ -181,40 +181,40 @@ def test_panel_adresi_yoksa_ve_mail_gitmezse(engine, posta):
     _giris(c, "admin@firma.com")
     posta.bozuk = True
     yid = _kullanici(engine, "y@firma.com").id
-    cevap = _post(c, f"/api/kullanicilar/{yid}/parola-linki")
+    cevap = _post(c, f"/panel/api/kullanicilar/{yid}/parola-linki")
     assert cevap.json()["mesaj"]["tur"] == "hata" and "Mail gönderilemedi" in cevap.json()["mesaj"]["mesaj"]
 
 
 def test_parolami_degistir(engine, posta):
     c = _istemci(engine, posta)
     _giris(c, "onay@firma.com")
-    cevap = _post(c, "/api/parolam", {"eski": "yanlis-parola-1", "yeni": YENI})
+    cevap = _post(c, "/panel/api/parolam", {"eski": "yanlis-parola-1", "yeni": YENI})
     assert cevap.status_code == 400 and "Mevcut parola" in cevap.json()["detail"]
-    assert _post(c, "/api/parolam", {"eski": PAROLA, "yeni": "kisa"}).status_code == 400
-    assert _post(c, "/api/parolam", {"eski": PAROLA, "yeni": YENI}).status_code == 200
-    assert c.get("/api/raporlar").status_code == 200  # kendi oturumu açık kalır
+    assert _post(c, "/panel/api/parolam", {"eski": PAROLA, "yeni": "kisa"}).status_code == 400
+    assert _post(c, "/panel/api/parolam", {"eski": PAROLA, "yeni": YENI}).status_code == 200
+    assert c.get("/panel/api/raporlar").status_code == 200  # kendi oturumu açık kalır
     assert _giris(_istemci(engine, posta), "onay@firma.com", YENI).status_code == 200
 
 
 def test_denetim_kaydi_ve_filtre(engine, posta, admin):
     _giris(_istemci(engine, posta), "onay@firma.com", "yanlis-parola-1")
-    hepsi = admin.get("/api/denetim").json()
+    hepsi = admin.get("/panel/api/denetim").json()
     assert hepsi["kayitlar"][0]["islem"] == "giris_basarisiz"  # en yeni önce
     assert "giris_basarisiz" in hepsi["islemler"]
     assert {"id": _kullanici(engine, "onay@firma.com").id, "ad": "Ayşe Onay"} in hepsi["kullanicilar"]
-    basarisiz = admin.get("/api/denetim", params={"islem": "giris_basarisiz"}).json()["kayitlar"]
+    basarisiz = admin.get("/panel/api/denetim", params={"islem": "giris_basarisiz"}).json()["kayitlar"]
     assert basarisiz and all(k["islem"] == "giris_basarisiz" for k in basarisiz)
     assert basarisiz[0]["kullanici"] == "Ayşe Onay"
     ilk = hepsi["kayitlar"][0]["id"]
-    assert all(k["id"] < ilk for k in admin.get("/api/denetim", params={"once": ilk}).json()["kayitlar"])
+    assert all(k["id"] < ilk for k in admin.get("/panel/api/denetim", params={"once": ilk}).json()["kayitlar"])
 
 
 def test_pasif_hesap_suresi_dolunca_silinir(engine, posta, admin):
     oid = _kullanici(engine, "onay@firma.com").id
-    _post(admin, f"/api/kullanicilar/{oid}/parola-linki")
-    assert _post(admin, f"/api/kullanicilar/{oid}/aktiflik", {"aktif": False}).status_code == 200
-    satir = next(k for k in admin.get("/api/kullanicilar").json()["kullanicilar"] if k["id"] == oid)
-    assert satir["silinecek"] and admin.get("/api/kullanicilar").json()["pasif_silme_gun"] == 30
+    _post(admin, f"/panel/api/kullanicilar/{oid}/parola-linki")
+    assert _post(admin, f"/panel/api/kullanicilar/{oid}/aktiflik", {"aktif": False}).status_code == 200
+    satir = next(k for k in admin.get("/panel/api/kullanicilar").json()["kullanicilar"] if k["id"] == oid)
+    assert satir["silinecek"] and admin.get("/panel/api/kullanicilar").json()["pasif_silme_gun"] == 30
 
     with Session(engine) as s:
         pasif = s.get(Kullanici, oid).pasif_tarihi
@@ -227,11 +227,11 @@ def test_pasif_hesap_suresi_dolunca_silinir(engine, posta, admin):
         assert s.scalar(select(Denetim).where(Denetim.islem == "kullanici_silindi")).detay["kullanici_no"] == oid
         assert guvenlik.pasifleri_sil(s, 30, pasif + timedelta(days=60)) == []  # ikinci kez silinmez
 
-    assert oid not in [k["id"] for k in admin.get("/api/kullanicilar").json()["kullanicilar"]]
-    cevap = _post(admin, f"/api/kullanicilar/{oid}/aktiflik", {"aktif": True})
+    assert oid not in [k["id"] for k in admin.get("/panel/api/kullanicilar").json()["kullanicilar"]]
+    cevap = _post(admin, f"/panel/api/kullanicilar/{oid}/aktiflik", {"aktif": True})
     assert cevap.status_code == 400 and "silinmiş" in cevap.json()["detail"]
     # Aynı adres yeni kullanıcı olarak yeniden eklenebilir.
-    assert _post(admin, "/api/kullanicilar", {"ad": "Ayşe", "eposta": "onay@firma.com", "rol": "onaylayici"}).status_code == 200
+    assert _post(admin, "/panel/api/kullanicilar", {"ad": "Ayşe", "eposta": "onay@firma.com", "rol": "onaylayici"}).status_code == 200
 
 
 def test_yeniden_acilan_hesabin_silme_suresi_sifirlanir(engine):

@@ -52,9 +52,9 @@ public class Imza {
         String adres = System.getenv("MEVZUAT_ADRES");
         String anahtar = System.getenv("MEVZUAT_ANAHTAR");
         HttpClient http = HttpClient.newHttpClient();
-        String liste = istek(http, adres, anahtar, "GET", "/api/v1/mevzuat?sadece_ilgili=false&adet=3", null);
+        String liste = istek(http, adres, anahtar, "GET", "/api/mevzuat?sadece_ilgili=false&adet=3", null);
         System.out.println("Java, mevzuat: " + liste.replaceAll("(?s).*\"toplam\":(\\d+).*", "$1"));
-        String onizleme = istek(http, adres, anahtar, "POST", "/api/v1/konular/onizleme",
+        String onizleme = istek(http, adres, anahtar, "POST", "/api/konular/onizleme",
             "{\"ad\":\"Deneme\",\"is_kollari\":[\"Ortak\"],\"kelimeler\":[\"vergi\"],\"haric\":[],\"dislanan\":[]}");
         System.out.println("Java, konu önizleme: " + onizleme.replaceAll("(?s).*\"taranan\":(\\d+).*", "$1"));
     }

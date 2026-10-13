@@ -8,7 +8,7 @@
 
 İmzalanan metin satır satır şudur, aralarında \\n var.
     YÖNTEM            GET, POST, PUT
-    ADRES             /api/v1/mevzuat, gönderildiği gibi
+    ADRES             /api/mevzuat, gönderildiği gibi
     SORGU             q=altin&sayfa=1, gönderildiği gibi, yoksa boş satır
     ZAMAN             X-Zaman ile aynı
     NUMARA            X-Numara ile aynı

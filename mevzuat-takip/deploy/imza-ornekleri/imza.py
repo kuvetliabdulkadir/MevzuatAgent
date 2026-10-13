@@ -29,8 +29,8 @@ def istek(adres, anahtar, yontem, yol, veri=None):
 
 if __name__ == "__main__":
     adres, anahtar = os.environ["MEVZUAT_ADRES"], os.environ["MEVZUAT_ANAHTAR"]
-    liste = istek(adres, anahtar, "GET", "/api/v1/mevzuat?sadece_ilgili=false&adet=3")
+    liste = istek(adres, anahtar, "GET", "/api/mevzuat?sadece_ilgili=false&adet=3")
     print("Python, mevzuat:", liste["toplam"])
-    onizleme = istek(adres, anahtar, "POST", "/api/v1/konular/onizleme",
+    onizleme = istek(adres, anahtar, "POST", "/api/konular/onizleme",
                  {"ad": "Deneme", "is_kollari": ["Ortak"], "kelimeler": ["vergi"], "haric": [], "dislanan": []})
     print("Python, konu önizleme:", onizleme["taranan"])

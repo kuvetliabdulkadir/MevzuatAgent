@@ -162,17 +162,17 @@ def panel(engine):
     with Session(engine) as s:
         kullanici_ekle(s, "onay@firma.com", "Onay", "onaylayici", PAROLA)
     client = TestClient(uygulama_olustur(engine, None, None, "t" * 40, ek_ekle=False, arayuz=None))
-    csrf = client.get("/api/oturum").json()["csrf"]
-    client.post("/api/giris", json={"eposta": "onay@firma.com", "parola": PAROLA}, headers={"X-CSRF-Token": csrf})
+    csrf = client.get("/panel/api/oturum").json()["csrf"]
+    client.post("/panel/api/giris", json={"eposta": "onay@firma.com", "parola": PAROLA}, headers={"X-CSRF-Token": csrf})
     return client
 
 
 def _put(client, veri):
-    return client.put("/api/zamanlama", json=veri, headers={"X-CSRF-Token": client.get("/api/oturum").json()["csrf"]})
+    return client.put("/panel/api/zamanlama", json=veri, headers={"X-CSRF-Token": client.get("/panel/api/oturum").json()["csrf"]})
 
 
 def test_panel_saatleri_degistirir_denetime_yazar(panel, engine):
-    durum = panel.get("/api/zamanlama").json()
+    durum = panel.get("/panel/api/zamanlama").json()
     assert durum["saatler"] == ["06:30", "18:00"] and not durum["zamanlayici_calisiyor"]
     cevap = _put(panel, {"saatler": ["07:00", "12:00", "19:00"], "surum": durum["surum"]})
     assert cevap.status_code == 200 and cevap.json()["saatler"] == ["07:00", "12:00", "19:00"]
@@ -186,8 +186,8 @@ def test_panel_saatleri_degistirir_denetime_yazar(panel, engine):
 def test_panel_nabizdan_zamanlayici_durumunu_gosterir(panel, engine):
     with Session(engine) as s:
         zm.nabiz_yaz(s, datetime.now() - timedelta(seconds=40), "bekliyor", datetime(2030, 1, 1, 6, 33), [time(6, 30)])
-    durum = panel.get("/api/zamanlama").json()
+    durum = panel.get("/panel/api/zamanlama").json()
     assert durum["zamanlayici_calisiyor"] and durum["durum"] == "bekliyor" and durum["sonraki"] == "2030-01-01T06:33"
     with Session(engine) as s:
         zm.nabiz_yaz(s, datetime.now() - timedelta(minutes=5), "bekliyor", None, [time(6, 30)])
-    assert not panel.get("/api/zamanlama").json()["zamanlayici_calisiyor"]  # nabız 2 dk'dan eski
+    assert not panel.get("/panel/api/zamanlama").json()["zamanlayici_calisiyor"]  # nabız 2 dk'dan eski

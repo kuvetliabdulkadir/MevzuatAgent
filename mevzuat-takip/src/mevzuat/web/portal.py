@@ -1,5 +1,5 @@
-"""Sürümlü adresler (/api/v1). Dış sistemlerin (şirket portalı vb.) mevzuatı okuduğu, raporu onayladığı, taramayı,
-kaynakları, konuları ve alıcı gruplarını yönettiği adresler. Alanlar değişirse yeni sürüm (/api/v2) açılır, v1 bozulmaz.
+"""Dış sistemlerin adresleri (/api). Şirket portalı vb. mevzuatı okur, raporu onaylar, taramayı,
+kaynakları, konuları ve alıcı gruplarını yönetir. Cevapların alanları sabittir, panelin ek alanları buraya sızmaz.
 Her istek API anahtarıyla imzalanır (HMAC, web/imza.py), anahtarın kendisi gönderilmez.
 """
 
@@ -298,7 +298,7 @@ class DenetimSatiri(BaseModel):
     kullanici_id: int | None = Field(examples=[13])
     kullanici: str | None = Field(examples=["API: Portal"])
     islem: str = Field(examples=["api_istegi"])
-    detay: dict = Field(examples=[{"yol": "/api/v1/mevzuat", "yontem": "GET"}])
+    detay: dict = Field(examples=[{"yol": "/api/mevzuat", "yontem": "GET"}])
     ip: str | None = Field(examples=["10.0.0.12"])
 
 
@@ -389,7 +389,7 @@ def _rapor_ozeti(r: Rapor) -> dict:
 
 def portal_api(oturum: Callable[[], Session], giris_gerekli: Callable, guvenlik_bagimliliklari: list) -> APIRouter:
     """Portal API'sinin adresleri. giris_gerekli panelle aynı kimlik doğrulamadır (API anahtarı ya da oturum)."""
-    api = APIRouter(prefix="/api/v1", dependencies=guvenlik_bagimliliklari, responses=HATALAR)
+    api = APIRouter(prefix="/api", dependencies=guvenlik_bagimliliklari, responses=HATALAR)
 
     def kimlik(request: Request) -> None:
         with oturum() as db:
@@ -512,48 +512,48 @@ def portal_api(oturum: Callable[[], Session], giris_gerekli: Callable, guvenlik_
 
 # --- yazma adresleri
 
-# Panelin /api adreslerinden v1'e de açılanlar ve cevaplarının sabit biçimi. İş kuralları (yetki, görev ayrılığı,
-# denetim kaydı) panelin fonksiyonlarında tek yerde kalır. Cevap bu modellerden geçer, panelin eklediği alan v1'e
+# Panelin /panel/api adreslerinden /api'ye de açılanlar ve cevaplarının sabit biçimi. İş kuralları (yetki, görev ayrılığı,
+# denetim kaydı) panelin fonksiyonlarında tek yerde kalır. Cevap bu modellerden geçer, panelin eklediği alan /api'ye
 # sızmaz, panelde bir alanın adı değişirse cevap modele uymaz ve testler yakalar.
 YAZMA_ADRESLERI: dict[tuple[str, str], type[BaseModel]] = {
-    ("POST", "/api/raporlar/{rapor_id}/karar"): Mesaj,
-    ("POST", "/api/raporlar/{rapor_id}/ek-gonderim"): Mesaj,
-    ("GET", "/api/gruplar"): GrupListesi,
-    ("POST", "/api/gruplar"): Grup,
-    ("PUT", "/api/gruplar/{grup_id}"): Grup,
-    ("GET", "/api/kaynak-tipleri"): KaynakTipleri,
-    ("POST", "/api/kaynaklar"): Kaynak,
-    ("PUT", "/api/kaynaklar/{ad}"): Kaynak,
-    ("POST", "/api/kaynaklar/{ad}/kaldir"): Kaynak,
-    ("POST", "/api/kaynaklar/{ad}/geri-getir"): Kaynak,
-    ("POST", "/api/kaynaklar/dene"): KaynakDenemesi,
-    ("POST", "/api/kaynaklar/bul"): KaynakBulma,
-    ("POST", "/api/konular"): Konu,
-    ("PUT", "/api/konular/{konu_id}"): Konu,
-    ("POST", "/api/konular/{konu_id}/pasif"): Konu,
-    ("POST", "/api/konular/{konu_id}/aktif"): Konu,
-    ("POST", "/api/konular/onizleme"): KonuOnizleme,
-    ("GET", "/api/zamanlama"): Zamanlama,
-    ("PUT", "/api/zamanlama"): Zamanlama,
-    ("GET", "/api/tarama/durum"): TaramaDurumu,
-    ("POST", "/api/tarama"): TaramaDurumu,
-    ("GET", "/api/kaynaklar/{ad}/gecmis"): Gecmis,
-    ("POST", "/api/kaynaklar/{ad}/geri-al"): Kaynak,
-    ("GET", "/api/konular/{konu_id}/gecmis"): Gecmis,
-    ("POST", "/api/konular/{konu_id}/geri-al"): Konu,
-    ("GET", "/api/kullanicilar"): KullaniciListesi,
-    ("POST", "/api/kullanicilar"): KullaniciIslemi,
-    ("POST", "/api/kullanicilar/{kullanici_id}/parola-linki"): KullaniciIslemi,
-    ("POST", "/api/kullanicilar/{kullanici_id}/aktiflik"): KullaniciIslemi,
-    ("GET", "/api/denetim"): DenetimListesi,
-    ("GET", "/api/ayarlar"): Ayarlar,
-    ("PUT", "/api/ayarlar"): Ayarlar,
-    ("POST", "/api/ayarlar/mail-dene"): Mesaj,
+    ("POST", "/panel/api/raporlar/{rapor_id}/karar"): Mesaj,
+    ("POST", "/panel/api/raporlar/{rapor_id}/ek-gonderim"): Mesaj,
+    ("GET", "/panel/api/gruplar"): GrupListesi,
+    ("POST", "/panel/api/gruplar"): Grup,
+    ("PUT", "/panel/api/gruplar/{grup_id}"): Grup,
+    ("GET", "/panel/api/kaynak-tipleri"): KaynakTipleri,
+    ("POST", "/panel/api/kaynaklar"): Kaynak,
+    ("PUT", "/panel/api/kaynaklar/{ad}"): Kaynak,
+    ("POST", "/panel/api/kaynaklar/{ad}/kaldir"): Kaynak,
+    ("POST", "/panel/api/kaynaklar/{ad}/geri-getir"): Kaynak,
+    ("POST", "/panel/api/kaynaklar/dene"): KaynakDenemesi,
+    ("POST", "/panel/api/kaynaklar/bul"): KaynakBulma,
+    ("POST", "/panel/api/konular"): Konu,
+    ("PUT", "/panel/api/konular/{konu_id}"): Konu,
+    ("POST", "/panel/api/konular/{konu_id}/pasif"): Konu,
+    ("POST", "/panel/api/konular/{konu_id}/aktif"): Konu,
+    ("POST", "/panel/api/konular/onizleme"): KonuOnizleme,
+    ("GET", "/panel/api/zamanlama"): Zamanlama,
+    ("PUT", "/panel/api/zamanlama"): Zamanlama,
+    ("GET", "/panel/api/tarama/durum"): TaramaDurumu,
+    ("POST", "/panel/api/tarama"): TaramaDurumu,
+    ("GET", "/panel/api/kaynaklar/{ad}/gecmis"): Gecmis,
+    ("POST", "/panel/api/kaynaklar/{ad}/geri-al"): Kaynak,
+    ("GET", "/panel/api/konular/{konu_id}/gecmis"): Gecmis,
+    ("POST", "/panel/api/konular/{konu_id}/geri-al"): Konu,
+    ("GET", "/panel/api/kullanicilar"): KullaniciListesi,
+    ("POST", "/panel/api/kullanicilar"): KullaniciIslemi,
+    ("POST", "/panel/api/kullanicilar/{kullanici_id}/parola-linki"): KullaniciIslemi,
+    ("POST", "/panel/api/kullanicilar/{kullanici_id}/aktiflik"): KullaniciIslemi,
+    ("GET", "/panel/api/denetim"): DenetimListesi,
+    ("GET", "/panel/api/ayarlar"): Ayarlar,
+    ("PUT", "/panel/api/ayarlar"): Ayarlar,
+    ("POST", "/panel/api/ayarlar/mail-dene"): Mesaj,
 }
 
 
 def yazma_adreslerini_ekle(api: APIRouter, panel_yollari: list, belge: dict, gruplar: dict[str, str]) -> set[tuple[str, str]]:
-    """YAZMA_ADRESLERI'ndeki panel adreslerini aynı fonksiyonla /api/v1 altına da ekler. belge panel_belgesi.BELGE,
+    """YAZMA_ADRESLERI'ndeki panel adreslerini aynı fonksiyonla /api altına da ekler. belge panel_belgesi.BELGE,
     gruplar adresin ilk parçasından dokümandaki gruba. Eklenen panel adreslerini döner, bunlar dokümanda gizlenir."""
     eklenen = set()
     for yol in panel_yollari:
@@ -564,11 +564,11 @@ def yazma_adreslerini_ekle(api: APIRouter, panel_yollari: list, belge: dict, gru
             if model is None:
                 continue
             baslik, aciklama, yetki, hatalar = belge[(yontem, yol.path)]
-            alt = yol.path.removeprefix("/api")
+            alt = yol.path.removeprefix("/panel/api")
             api.add_api_route(alt, yol.endpoint, methods=[yontem], response_model=model, summary=baslik,
                               description=f"{aciklama}\n\n**Yetki:** {yetki}".strip(), responses=hatalar,
                               tags=[gruplar[alt.split("/")[1]]])
             eklenen.add((yontem, yol.path))
     if eksik := set(YAZMA_ADRESLERI) - eklenen:
-        raise RuntimeError(f"v1'e açılacak panel adresi bulunamadı: {sorted(eksik)}")
+        raise RuntimeError(f"/api'ye açılacak panel adresi bulunamadı: {sorted(eksik)}")
     return eklenen
