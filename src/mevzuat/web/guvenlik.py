@@ -17,7 +17,6 @@
 import hashlib
 import hmac
 import html
-import os
 # secrets, tahmin edilemeyen rastgele değer (link için) üretir.
 import secrets
 import time
@@ -417,11 +416,6 @@ def aktiflik_degistir(session: Session, hedef: Kullanici, aktif: bool, yapan: Ku
     hedef.pasif_tarihi = None if aktif else datetime.now()
     denetle(session, "kullanici_aktif" if aktif else "kullanici_pasif", yapan.id, ip, hedef=hedef.eposta)
     session.commit()
-
-
-# .env'deki MEVZUAT_PASIF_SILME_GUN, yoksa 30.
-def pasif_silme_gunu() -> int:
-    return int(os.environ.get("MEVZUAT_PASIF_SILME_GUN", PASIF_SILME_GUN))
 
 
 # Pasif hesabın silineceği gün, silme kapalıysa None.

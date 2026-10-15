@@ -2,7 +2,7 @@
 
 Sunucuda Docker yoksa sistem doğrudan kurulur: PostgreSQL, Python (uv ile) ve üç systemd servisi
 (panel, zamanlayıcı, gecelik yedek). Kod aynıdır, Docker'lı kurulumdan farkı sadece çalıştırma biçimidir.
-Docker varsa [`SIRKET-KURULUM.md`](SIRKET-KURULUM.md) daha kısadır.
+Docker varsa [`DOCKER.md`](DOCKER.md) daha kısadır.
 
 Bu rehber `deploy/prova-dockersiz.sh` ile temiz bir Debian 12 container'ında adım adım denenir (en alttaki "Prova").
 Komutlar `root` ile çalıştırılır. `firma` geçen yerleri kendi değerlerinizle değiştirin.
