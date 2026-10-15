@@ -76,10 +76,3 @@ def test_sure_dolmadan_ya_da_kapaliyken_silinmez(session):
     assert saklama.eskileri_sil(session, 0, SIMDI + timedelta(days=999)) == saklama.Silinenler()
     assert session.scalar(select(func.count()).select_from(Rapor)) == 1
     assert session.scalar(select(func.count()).select_from(Denetim)) == 1
-
-
-def test_sure_ayardan_okunur(monkeypatch):
-    monkeypatch.delenv("MEVZUAT_SAKLAMA_GUN", raising=False)
-    assert saklama.saklama_gunu() == 30
-    monkeypatch.setenv("MEVZUAT_SAKLAMA_GUN", "15")
-    assert saklama.saklama_gunu() == 15

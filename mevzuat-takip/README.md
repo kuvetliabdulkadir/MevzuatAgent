@@ -6,7 +6,7 @@ mail ile dağıtan sistem.
 
 Bir kuyumculuk firmasında staj projesi olarak geliştirildi (Ekim 2026). İş kolları: **Kuyum, Döviz/Altın, Oto kiralama** ve hepsini ilgilendiren **Ortak**.
 
-> **Durum:** Canlıda çalışıyor (Docker, Ubuntu 24.04, HTTPS). 431 test geçiyor.
+> **Durum:** Canlıda çalışıyor (Docker, Ubuntu 24.04, HTTPS). 441 test geçiyor.
 
 ---
 
@@ -67,7 +67,7 @@ Portal ekibine verilecek tek sayfalık bağlantı belgesi: [deploy/PORTAL-BAGLAN
 API adresleri tarayıcıda yeni sekmede açılmaz, panel oturumu açık olsa da. `MEVZUAT_API_IMZA=0` sadece deneme içindir,
 o zaman anahtar `Authorization: Bearer` ile gönderilir. Anahtar seçilen rolün (tam yetki, admin ya da onaylayıcı) yetkisiyle çalışır,
 süreli ya da süresiz olur, iptal edilebilir, her isteği denetim kaydına yazılır, kendisi değil özeti saklanır.
-Adım adım deneme senaryoları (adres, gövde, beklenen sonuç): [deploy/API-TEST-REHBERI.md](deploy/API-TEST-REHBERI.md).
+Her adresin gövdesi, cevabı ve hata kodları dokümanda (`/api/dokuman`).
 
 **Ayarlar:** Mail sunucusu, panel adresi, uyarı adresleri, PDF eki, MFA zorunluluğu ve saklama süreleri panelden değişir,
 yeniden başlatma gerekmez. Panelde girilen değer `.env`'in önüne geçer. Mail şifresi veritabanında şifreli saklanır.
@@ -79,7 +79,7 @@ yeniden başlatma gerekmez. Panelde girilen değer `.env`'in önüne geçer. Mai
 | Dil, paket yönetimi | Python 3.12, uv |
 | Çekme, ayrıştırma | httpx, selectolax (Playwright sadece isteğe bağlı yedek tip) |
 | PDF, OCR | pdfplumber, pypdfium2, Tesseract (Türkçe) |
-| Veritabanı | PostgreSQL 16 (sunucu), SQLite (geliştirme), SQLAlchemy 2, Alembic (18 migration) |
+| Veritabanı | PostgreSQL 16 (sunucu), SQLite (geliştirme), SQLAlchemy 2, Alembic (19 migration) |
 | Fark | difflib (madde bazında) |
 | Mail | smtplib, Jinja2 (HTML + düz metin) |
 | Backend | FastAPI (JSON API), imzalı HttpOnly çerez oturumu |
@@ -159,11 +159,11 @@ src/mevzuat/
   migrations/          Alembic şema geçişleri
 frontend/              React panel (dist derlenmiş hâli)
 config/                ilk kurulum tohumu: kaynaklar, konular, izlenen mevzuat
-deploy/                kurulum rehberleri (Docker ve Docker'sız), servis dosyaları, yedek betikleri, API test rehberi
+deploy/                kurulum rehberleri (Docker ve Docker'sız), servis dosyaları, yedek betikleri, imza örnekleri
 tests/                 testler ve gerçek sayfalardan alınmış örnekler
 ```
 
 ## Rakamlar
 
-5 kaynak (4 tarama + güncel metin) · 8 konu · 21 takip edilen mevzuat · 17 tablo · 18 migration · 434 test ·
+5 kaynak (4 tarama + güncel metin) · 8 konu · 21 takip edilen mevzuat · 18 tablo · 19 migration · 441 test ·
 90 günlük gerçek veride 716 Resmî Gazete başlığından 85'i ilgili · Resmî Gazete PDF'lerinin %82'si taranmış görüntü.
