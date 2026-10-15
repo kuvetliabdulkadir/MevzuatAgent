@@ -10,7 +10,6 @@ Silinmeyenler.
   - Takip edilen mevzuatın metin sürümleri, değişiklik farkı bunlardan çıkar.
 """
 
-import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -24,11 +23,6 @@ from mevzuat.web.guvenlik import denetle
 SAKLAMA_GUN = 30
 # Bu durumdaki raporlarla işi bitmiştir, süresi dolunca silinebilir.
 BITMIS_DURUMLAR = ("GONDERILDI", "REDDEDILDI")
-
-
-# .env'deki MEVZUAT_SAKLAMA_GUN, yoksa 30.
-def saklama_gunu() -> int:
-    return int(os.environ.get("MEVZUAT_SAKLAMA_GUN", SAKLAMA_GUN))
 
 
 # Hangi tablodan kaç satır silindi.

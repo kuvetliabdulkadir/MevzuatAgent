@@ -12,3 +12,8 @@ docs/
 disa_aktarim/
 .ruff_cache/
 yedekler/
+
+# Şirket içi rehberler, GitHub'a gitmez
+deploy/API-TEST-REHBERI.md
+deploy/API-TEST-REHBERI.html
+deploy/SIRKET-KURULUM.md
