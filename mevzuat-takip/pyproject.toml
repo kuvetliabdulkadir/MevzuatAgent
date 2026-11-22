@@ -18,7 +18,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "python-multipart>=0.0.9",
     "qrcode>=7.4",
-    "selectolax>=0.3",
+    "selectolax>=1.0",
     "sqlalchemy>=2.0",
     "uvicorn>=0.30",
 ]

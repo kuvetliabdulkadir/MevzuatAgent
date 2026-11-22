@@ -210,3 +210,44 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* Arşiv metin görünümü (html_okuma.py ve pdf_okuma.py'nin ürettiği güvenli HTML). "PDF'in içeriği gibi": başlıklar ortalı
+   ve kalın, madde başı kalın, fıkralar paragraf, bentler girintili, tablolar çerçeveli, sayfa görüntüleri yerinde. */
+.arsiv-metin {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 14px;
+  line-height: 1.65;
+  color: #1c1917;
+  max-width: 820px;
+  margin: 0 auto;
+}
+.arsiv-metin p { margin: 0 0 0.55em; text-align: justify; }
+.arsiv-metin h2, .arsiv-metin h3, .arsiv-metin h4 { font-weight: 700; margin: 1em 0 0.5em; }
+.arsiv-metin h2 { font-size: 1.1em; }
+.arsiv-metin h3, .arsiv-metin h4 { font-size: 1em; }
+.arsiv-metin .orta { text-align: center; }
+.arsiv-metin .sag { text-align: right; }
+.arsiv-metin .baslik { margin-top: 1em; }
+.arsiv-metin .madde { margin-top: 0.8em; }
+.arsiv-metin .fikra { text-indent: 1.5em; }
+.arsiv-metin .bent { padding-left: 2.2em; text-indent: -1.2em; }
+.arsiv-metin .madde-isareti { padding-left: 1.5em; }
+.arsiv-metin .tablo-satiri { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; }
+.arsiv-metin .tablo { overflow-x: auto; margin: 0.8em 0; }
+.arsiv-metin table { border-collapse: collapse; font-size: 12.5px; line-height: 1.4; font-family: system-ui, sans-serif; }
+.arsiv-metin td, .arsiv-metin th { border: 1px solid #a8a29e; padding: 3px 6px; vertical-align: top; text-align: left; }
+.arsiv-metin th { background: #f5f5f4; }
+.arsiv-metin td p, .arsiv-metin th p { margin: 0; text-align: left; text-indent: 0; }
+.arsiv-metin figure { margin: 0.8em 0; text-align: center; }
+.arsiv-metin img { max-width: 100%; height: auto; border: 1px solid #e7e5e4; cursor: zoom-in; display: inline-block; }
+.arsiv-metin .sayfa { border-top: 1px dashed #d6d3d1; padding-top: 0.4em; margin-top: 1em; }
+.arsiv-metin .sayfa:first-child { border-top: 0; margin-top: 0; }
+.arsiv-metin .sayfa-no { font-family: system-ui, sans-serif; font-size: 11px; color: #a8a29e; text-align: right; margin: 0; }
+.arsiv-metin .ocr-metni { font-family: system-ui, sans-serif; font-size: 12px; color: #57534e; margin: 0.3em 0 0.8em; }
+.arsiv-metin .ocr-metni summary { cursor: pointer; color: #78716c; }
+.arsiv-metin section.excel-sayfasi h4, .arsiv-metin section.slayt h4 { font-family: system-ui, sans-serif; color: #57534e; }
+
+/* Sürüm farkı: eklenen yeşil altı çizili, silinen kırmızı üstü çizili, yerinde. */
+.arsiv-fark { font-family: Georgia, 'Times New Roman', serif; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; }
+.arsiv-fark ins { background: #d1fae5; color: #065f46; text-decoration: underline; text-decoration-color: #059669; }
+.arsiv-fark del { background: #ffe4e6; color: #9f1239; text-decoration: line-through; }

@@ -15,6 +15,7 @@ import { GruplarPage } from './pages/GruplarPage';
 import { SourcesPage } from './pages/SourcesPage';
 import { KeywordsPage } from './pages/KeywordsPage';
 import { TaramaPage, ZamanlayiciUyarisi } from './pages/TaramaPage';
+import { ArsivPage } from './pages/ArsivPage';
 import { KullanicilarPage } from './pages/KullanicilarPage';
 import { DenetimPage } from './pages/DenetimPage';
 import { AyarlarPage } from './pages/AyarlarPage';
@@ -171,6 +172,7 @@ const Panel: React.FC<{ kullanici: Kullanici; mailKapali: boolean; onCikis: () =
           {activeTab === 'kaynaklar' && kullanici.ayar_yonetebilir && <SourcesPage kurtarmaYapabilir={kullanici.kurtarma_yapabilir} />}
           {activeTab === 'konular' && kullanici.ayar_yonetebilir && <KeywordsPage kurtarmaYapabilir={kullanici.kurtarma_yapabilir} />}
           {activeTab === 'tarama' && <TaramaPage ayarYonetebilir={kullanici.ayar_yonetebilir} />}
+          {activeTab === 'arsiv' && <ArsivPage ayarYonetebilir={kullanici.ayar_yonetebilir} />}
           {activeTab === 'kullanicilar' && kullanici.kurtarma_yapabilir && <KullanicilarPage benimId={kullanici.id} />}
           {activeTab === 'denetim' && kullanici.kurtarma_yapabilir && <DenetimPage />}
           {activeTab === 'ayarlar' && kullanici.kurtarma_yapabilir && <AyarlarPage />}

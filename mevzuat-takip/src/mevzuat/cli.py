@@ -6,6 +6,10 @@
     uv run python -m mevzuat.cli onizle              # rapor önizlemesini rapor_onizleme.html dosyasına yazar, bir şey işaretlemez
     uv run python -m mevzuat.cli panel               # onay paneli, 127.0.0.1:8000 adresinde, gönderim sadece buradan
     uv run python -m mevzuat.cli zamanlayici         # sürekli çalışır, saatler panelden gelir (varsayılan 06:30 ve 18:00), saati gelince gunluk'u başlatır
+    uv run python -m mevzuat.cli arsiv-kur --tur Kanun   # mevzuat.gov.tr arşivi, panelden de başlatılır, saatler sürer
+    uv run python -m mevzuat.cli arsiv-durum         # arşivde tür başına kaç mevzuat var
+    uv run python -m mevzuat.cli arsiv-kontrol       # teslim kontrolü (sadece okur), rapor arsiv/kontrol/
+    uv run python -m mevzuat.cli arsiv-katla --onay  # her mevzuatın son sürümü v1 olur (teslim tabanı, karar 19)
     uv run python -m mevzuat.cli kullanici-ekle --eposta a@firma.com --ad "Ad Soyad" --rol onaylayici
     uv run python -m mevzuat.cli kullanici-pasif --eposta a@firma.com
     uv run python -m mevzuat.cli dene masak --gun 30 # bir kaynağı dener, DB'ye yazmaz
@@ -392,6 +396,64 @@ def izlenen_komutu(args: argparse.Namespace) -> None:
             print(f"{i.anahtar:>14}  {i.neden:<8}  son kontrol: {kontrol:<16}  sürüm: {sayilar.get(i.anahtar, 0)}  {i.ad}")
 
 
+# "arsiv-kur" komutu, mevzuat.gov.tr'deki bütün yürürlükteki mevzuatı arşive alır (arsiv.py).
+def arsiv_kur_komutu(args: argparse.Namespace) -> None:
+    """Panelden başlatılınca zamanlayıcı bunu --istek ile çağırır, seçenekler istekten okunur. Elle de çalışır."""
+    from mevzuat import arsiv
+
+    engine = make_engine()
+    migrate(engine)
+    durum = arsiv.arsivi_olustur(engine, istek_id=args.istek, turler=args.tur or None, yeniden=args.yeniden,
+                                 anahtarlar=args.anahtar or None)
+    print(f"Arşiv işi: {durum}")
+    if durum == "HATALI":
+        raise SystemExit(1)
+
+
+# "arsiv-kontrol" komutu, teslim kontrolü (arsiv_kontrol.py). Zorunlu ölçütlerden biri tutmazsa çıkış kodu 1.
+def arsiv_kontrol_komutu(args: argparse.Namespace) -> None:
+    from mevzuat import arsiv, arsiv_kontrol
+
+    engine = make_engine()
+    migrate(engine)
+    klasor = arsiv.arsiv_klasoru()
+    with Session(engine) as session:
+        r = arsiv_kontrol.kontrol(session, klasor, sha_dogrula=args.sha)
+    j, m = arsiv_kontrol.rapor_yaz(r, klasor)
+    print(arsiv_kontrol.rapor_metni(r)[:6000])
+    print(f"Rapor: {m}")
+    print(f"Ayrıntı: {j}")
+    if not r["hatasiz"]:
+        raise SystemExit(1)
+
+
+# "arsiv-katla" komutu, teslim tabanı: her mevzuat tek sürüm (karar 19). --onay olmadan çalışmaz.
+def arsiv_katla_komutu(args: argparse.Namespace) -> None:
+    from mevzuat import arsiv_kontrol
+
+    if not args.onay:
+        raise SystemExit("Geri alınamaz. Önce veritabanı yedeği alın, sonra --onay ile çalıştırın.")
+    engine = make_engine()
+    migrate(engine)
+    with Session(engine) as session:
+        katlanan, silinen = arsiv_kontrol.katla(session)
+    print(f"{katlanan} mevzuat katlandı, {silinen} eski sürüm silindi. Her mevzuat artık tek sürüm (v1).")
+
+
+# "arsiv-durum" komutu, arşivde tür başına kaç mevzuat olduğunu ve son işin durumunu yazar.
+def arsiv_durum_komutu(args: argparse.Namespace) -> None:
+    from mevzuat import arsiv
+
+    engine = make_engine()
+    migrate(engine)
+    with Session(engine) as session:
+        d = arsiv.arsiv_durumu(session)
+    for t in d["turler"]:
+        print(f"{t['ad']:<16} {t['toplam']:>6}  {t['sayilar']}  kalkan: {t['kalkan']}")
+    print(f"Toplam {d['toplam']} mevzuat, {d['surum_toplam']} sürüm. Son iş: "
+          f"{d['istek']['durum'] if d['istek'] else 'yok'}")
+
+
 # "panel" komutu, web panelini (FastAPI) başlatır.
 def panel_komutu(args: argparse.Namespace) -> None:
     import uvicorn
@@ -591,6 +653,21 @@ def main() -> None:
     pn.set_defaults(func=panel_komutu)
 
     alt.add_parser("izlenen", help="Güncel metni takip edilen mevzuatı listele").set_defaults(func=izlenen_komutu)
+
+    ak = alt.add_parser("arsiv-kur", help="mevzuat.gov.tr'deki bütün yürürlükteki mevzuatı arşive al (saatler sürer)")
+    ak.add_argument("--istek", type=int, help="Panelden gelen arşiv isteği (zamanlayıcı verir)")
+    ak.add_argument("--tur", action="append", help="Sadece bu tür (birden çok kez yazılabilir), ör. --tur Kanun")
+    ak.add_argument("--yeniden", action="store_true", help="Arşivdekileri de yeniden çek, değişenin yeni sürümü olsun")
+    ak.add_argument("--anahtar", nargs="+", help="Deneme: liste adımı atlanır, sadece bu anahtarlar baştan çekilir "
+                                                 "(arşivde olmaları gerekir), ör. --anahtar 1.5.4760 20.5.5123")
+    ak.set_defaults(func=arsiv_kur_komutu)
+    alt.add_parser("arsiv-durum", help="Arşivde tür başına kaç mevzuat var").set_defaults(func=arsiv_durum_komutu)
+    akn = alt.add_parser("arsiv-kontrol", help="Arşivin teslim kontrolü (sadece okur), rapor arsiv/kontrol/ altına yazılır")
+    akn.add_argument("--sha", action="store_true", help="Her dosyanın SHA-256 özetini de doğrula (bütün dosyaları okur, uzun sürer)")
+    akn.set_defaults(func=arsiv_kontrol_komutu)
+    akt = alt.add_parser("arsiv-katla", help="Her mevzuatın son sürümü v1 olur, öncekiler silinir (teslim tabanı, karar 19)")
+    akt.add_argument("--onay", action="store_true", help="Geri alınamaz; önce veritabanı yedeği alın")
+    akt.set_defaults(func=arsiv_katla_komutu)
 
     zm = alt.add_parser("zamanlayici", help="Sürekli çalışır: paneldeki saatlerde günlük işi başlatır (Docker ve sunucu)")
     zm.add_argument("--hemen", action="store_true", help="Başlar başlamaz bir kez çalıştır, sonra saatleri bekle")

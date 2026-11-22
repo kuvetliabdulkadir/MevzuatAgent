@@ -445,11 +445,11 @@ def test_menu_veritabanindan_yetkiye_gore_gelir(migrasyonlu):
     assert client.get("/panel/api/menu").status_code == 401
     _giris(client)
     onaylayici = [m["anahtar"] for m in client.get("/panel/api/menu").json()]
-    assert onaylayici == ["raporlar", "gruplar", "kaynaklar", "konular", "tarama"]  # API dokümanı yok
+    assert onaylayici == ["raporlar", "gruplar", "kaynaklar", "konular", "tarama", "arsiv"]  # API dokümanı yok
     _post(client, "/panel/api/cikis", {})
     _giris(client, eposta="admin@firma.com")
     admin = client.get("/panel/api/menu").json()
-    assert [m["anahtar"] for m in admin] == ["raporlar", "gruplar", "kaynaklar", "konular", "tarama", "kullanicilar",
+    assert [m["anahtar"] for m in admin] == ["raporlar", "gruplar", "kaynaklar", "konular", "tarama", "arsiv", "kullanicilar",
                                              "denetim", "ayarlar", "api_anahtarlari", "api_dokumani"]
     assert admin[-1] == {"anahtar": "api_dokumani", "etiket": "API Dokümanı", "aciklama": "Swagger, uç noktalar",
                          "ikon": "BookOpen", "adres": "/api/dokuman"}
@@ -490,7 +490,7 @@ def test_api_dokumani_giris_ister_ve_csp_ile_uyumlu(migrasyonlu):
     gruplar_cevabi = sema["paths"]["/api/gruplar"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert gruplar_cevabi == {"$ref": "#/components/schemas/GrupListesi"}
     assert [e["name"] for e in sema["tags"]] == ["Mevzuat", "Raporlar", "Konular", "Kaynaklar", "Alıcı grupları", "Tarama",
-                                                 "Kullanıcılar", "Ayarlar", "Denetim kaydı"]
+                                                 "Kullanıcılar", "Ayarlar", "Denetim kaydı", "Portal"]
     # Her panel uç noktası belgeli: Türkçe başlık, yetki satırı, hata cevapları.
     for yol, islemler in sema["paths"].items():
         for yontem, islem in islemler.items():

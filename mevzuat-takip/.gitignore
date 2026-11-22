@@ -5,6 +5,7 @@ __pycache__/
 .env
 mevzuat.db
 giden_mailler/
+arsiv/
 rapor_onizleme.*
 mevzuat.lock
 docker_test_hesaplari.txt

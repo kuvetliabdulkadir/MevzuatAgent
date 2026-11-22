@@ -70,6 +70,31 @@ def _komut(goruntu_yolu: str) -> list[str]:
     return komut
 
 
+# Aynı anda kaç Tesseract çalışsın (arşivde büyük belgeler sayfa sayfa paralel okunur). Varsayılan çekirdek sayısının yarısı.
+def paralel_sayisi() -> int:
+    deger = os.environ.get("MEVZUAT_OCR_PARALEL", "").strip()
+    if deger.isdigit() and int(deger) > 0:
+        return int(deger)
+    return max(1, (os.cpu_count() or 2) // 2)
+
+
+class OcrHatasi(RuntimeError):
+    pass
+
+
+# Bir resim dosyasını okur. Paralel çalışırken her Tesseract tek iş parçacığı kullanır (OMP_THREAD_LIMIT=1),
+# yoksa çekirdekler birbirini boğar.
+def goruntu_oku(goruntu: Path, zaman_asimi: int = SAYFA_ZAMAN_ASIMI, tek_cekirdek: bool = False) -> str:
+    ortam = {**os.environ, "OMP_THREAD_LIMIT": "1"} if tek_cekirdek else None
+    try:
+        sonuc = subprocess.run(_komut(str(goruntu)), capture_output=True, timeout=zaman_asimi, env=ortam)
+    except subprocess.TimeoutExpired as e:
+        raise OcrHatasi(f"OCR {zaman_asimi} sn içinde bitmedi") from e
+    if sonuc.returncode != 0:
+        raise OcrHatasi(f"Tesseract hata verdi: {sonuc.stderr.decode('utf-8', 'replace')[:300]}")
+    return sonuc.stdout.decode("utf-8", "replace").replace("\r\n", "\n").strip()
+
+
 # PDF'in istenen sayfalarını tek tek resme çevirip OCR'dan geçirir. Sonuç, {sayfa no, okunan metin}.
 def sayfalari_ocr(veri: bytes, gecici_klasor: Path, sayfa_nolari: list[int] | None = None) -> dict[int, str]:
     """İstenen sayfaları görüntüye çevirip OCR'dan geçirir. Sayfa numaraları 0'dan başlar, None verilirse bütün sayfalar okunur."""

@@ -12,7 +12,7 @@ from pathlib import Path
 
 # pdfplumber, PDF'teki seçilebilir yazıyı çıkarır.
 import pdfplumber
-from selectolax.parser import HTMLParser
+from selectolax.lexbor import LexborHTMLParser as HTMLParser
 
 from mevzuat import ocr
 
@@ -31,6 +31,33 @@ OCR_SAYFA_SINIRI = 30
 # Böyle sayfalar tek tek OCR'dan geçirilir, belgenin geri kalanı olduğu gibi kalır.
 KARISIK_METIN_ESIGI = 200
 KARISIK_RESIM_ORANI = 0.25
+
+# pdf_metni'ne sayfa sınırı verilmediğini belirten işaret (None "sınırsız" anlamına geliyor).
+_VARSAYILAN_SINIR = object()
+
+# Eski PDF'lerde yazı katmanı var ama font haritası yok. Çıkan metin "(cid:5)(cid:7)..." gibi çöptür.
+_CID = re.compile(r"\(cid:\d+\)")
+# Metnin bundan fazlası (cid:N) ise sayfa okunmamış sayılır, OCR'a gider.
+CID_ORANI = 0.2
+
+
+# Sayfa yazısı çöp mü (okunamayan font kodları ya da anlamsız simgeler).
+def bozuk_yazi_mi(metin: str) -> bool:
+    if not metin:
+        return False
+    cid_uzunluk = sum(len(b) for b in _CID.findall(metin))
+    if cid_uzunluk / len(metin) > CID_ORANI:
+        return True
+    # Unicode "yedek karakter" (U+FFFD) ve özel kullanım alanı harfleri de bozuk font işaretidir.
+    kotu = sum(1 for c in metin if c == "�" or "" <= c <= "")
+    return kotu / len(metin) > CID_ORANI
+
+
+# Sayfanın yazısı, bozuksa boş (böylece taranmış sayfa gibi OCR'a gider).
+def temiz_sayfa_yazisi(metin: str | None) -> str:
+    metin = (metin or "").strip()
+    return "" if bozuk_yazi_mi(metin) else metin
+
 
 # HTML'in başındaki <meta charset="windows-1254"> gibi satırdan harf kodlamasını yakalayan kalıp.
 META_CHARSET = re.compile(rb"""charset\s*=\s*["']?([\w-]+)""", re.IGNORECASE)
@@ -143,7 +170,10 @@ def _resim_orani(sayfa) -> float:
 
 
 # PDF'in metnini çıkarır. Seçilebilir yazı yoksa (taranmış belge) ya da bazı sayfalar resimse OCR yapar.
-def pdf_metni(veri: bytes) -> Icerik:
+def pdf_metni(veri: bytes, sayfa_siniri: int | None | object = _VARSAYILAN_SINIR) -> Icerik:
+    """sayfa_siniri, OCR'ın okuyacağı en fazla sayfa. Verilmezse OCR_SAYFA_SINIRI, None verilirse sınır yok (arşiv)."""
+    if sayfa_siniri is _VARSAYILAN_SINIR:
+        sayfa_siniri = OCR_SAYFA_SINIRI
     sayfalar: list[str] = []
     # Belgenin tamamı OCR'dan geçecek mi.
     tum_belge_ocr = False
@@ -151,7 +181,7 @@ def pdf_metni(veri: bytes) -> Icerik:
     # PDF'i bellekten aç ve sayfa sayfa yazıyı çıkar.
     with pdfplumber.open(io.BytesIO(veri)) as pdf:
         for i, sayfa in enumerate(pdf.pages):
-            metin = (sayfa.extract_text() or "").strip()
+            metin = temiz_sayfa_yazisi(sayfa.extract_text())
             # Sayfada neredeyse hiç yazı yok, belge taranmış, hepsini OCR'la.
             if len(metin) < OCR_ESIGI:
                 tum_belge_ocr = True
@@ -176,8 +206,9 @@ def pdf_metni(veri: bytes) -> Icerik:
     # OCR'lanacak sayfalar, hepsi ya da sadece resimli olanlar.
     okunacak = list(range(len(sayfalar))) if tum_belge_ocr else gorsel_sayfalar
     # 30 sayfa sınırı aşıldıysa ilk 30 sayfayı al.
-    sinir_asildi = len(okunacak) > OCR_SAYFA_SINIRI
-    okunacak = okunacak[:OCR_SAYFA_SINIRI]
+    sinir_asildi = sayfa_siniri is not None and len(okunacak) > sayfa_siniri
+    if sayfa_siniri is not None:
+        okunacak = okunacak[:sayfa_siniri]
     # Geçici klasörde OCR yap (klasör iş bitince silinir).
     with tempfile.TemporaryDirectory() as klasor:
         okunan = ocr.sayfalari_ocr(veri, Path(klasor), okunacak)
@@ -191,7 +222,7 @@ def pdf_metni(veri: bytes) -> Icerik:
         metin = "\n\n".join(s for s in sayfalar if s)
     # Sınır aşıldıysa metnin sonuna not düş.
     if sinir_asildi:
-        metin += (f"\n\n[Belge {len(sayfalar)} sayfa; otomatik okuma ilk {OCR_SAYFA_SINIRI} taranmış sayfayla "
+        metin += (f"\n\n[Belge {len(sayfalar)} sayfa; otomatik okuma ilk {sayfa_siniri} taranmış sayfayla "
                   "sınırlandı. Tamamı için orijinal belgeye bakın.]")
     # "OCR ile okundu" işaretiyle ver (raporda "otomatik okunmuş" yazar).
     return Icerik(metin, ocr_ile=True)

@@ -18,6 +18,7 @@ ETIKETLER = [
     {"name": "Kullanıcılar", "description": "Onaylayıcı ve yönetici hesapları"},
     {"name": "Ayarlar", "description": "Mail sunucusu, adresler, süreler"},
     {"name": "Denetim kaydı", "description": "Kim, ne zaman, ne yaptı"},
+    {"name": "Portal", "description": "Yalnız yetkilendirilmiş portal servisi (imzalı istek + portal anahtarı)"},
 ]
 
 # Dokümanda gösterilmeyen, sadece panel arayüzünün kullandığı adresler. API anahtarıyla gerekmezler (giriş, iki adımlı
@@ -198,6 +199,43 @@ BELGE: dict[tuple[str, str], tuple[str, str, str, dict]] = {
                               "sürerken ikinci istek reddedilir.", AYAR,
                               {**H401, **H403, 409: _hata("Tarama zaten sırada ya da sürüyor, ya da zamanlayıcı çalışmıyor",
                                                                  "Bir tarama isteği zaten sırada ya da çalışıyor.")}),
+    # --- arşiv
+    ("GET", "/panel/api/arsiv/durum"): ("Arşivin durumu", "Tür başına arşivdeki mevzuat sayıları (metin durumuna göre), son arşiv işinin "
+                                  "durumu ve ilerlemesi: BEKLIYOR, CALISIYOR, DURDURULUYOR, BITTI, DURDURULDU ya da HATALI.",
+                                  HERKES, H401),
+    ("POST", "/panel/api/arsiv/baslat"): ("Arşivi oluştur", "mevzuat.gov.tr'deki yürürlükteki mevzuatı listeler, metinlerini ve eklerini "
+                                    "arşive alır (zamanlayıcı 30 saniye içinde başlatır, saatler sürer). `turler` boşsa bütün türler. "
+                                    "`yeniden` ise arşivdekiler de baştan çekilir, değişenin yeni sürümü olur. Kesilen iş yeniden "
+                                    "başlatılınca kaldığı yerden devam eder.", AYAR,
+                                    {**H401, **H403, 409: _hata("Arşiv işi zaten sırada ya da sürüyor, ya da zamanlayıcı çalışmıyor",
+                                                                "Bir arşiv işi zaten sırada ya da çalışıyor.")}),
+    ("POST", "/panel/api/arsiv/durdur"): ("Arşiv işini durdur", "Sıradaki iş hemen, çalışan iş sıradaki mevzuattan sonra durur.", AYAR,
+                                    {**H401, **H403, 409: _hata("Durdurulacak iş yok", "Çalışan ya da sırada bekleyen arşiv işi yok.")}),
+    ("GET", "/panel/api/arsiv/liste"): ("Arşiv listesi", "Arşivdeki mevzuat, `ara` (ad ya da anahtar), `tur`, `durum` (TAMAM, BEKLIYOR, "
+                                  "OCR_GEREKLI, SITEDE_YOK, HATA, KALKTI, KUSURLU) ve `sayfa` ile. Sayfa başına 50 kayıt.", HERKES, H401),
+    ("GET", "/panel/api/arsiv/mevzuat/{anahtar}"): ("Arşivdeki mevzuat", "Künye ve sürümler (v1, v2 ..., metinsiz): sürüm türü (ilk, "
+                                              "degisiklik, okuma_duzeltmesi), kalite, okuma yöntemi, ekler (durumu, biçimi, içindekiler), "
+                                              "sitenin PDF'i, yeni Resmî Gazete notları.", HERKES, {**H401, **H404}),
+    ("GET", "/panel/api/arsiv/mevzuat/{anahtar}/metin"): ("Arşivdeki metin", "Bir sürümün düz metni, `surum` verilmezse en sonuncusu.",
+                                                    HERKES, {**H401, **H404}),
+    ("GET", "/panel/api/arsiv/mevzuat/{anahtar}/gorunum"): ("Arşivdeki metnin görünümü", "Bir sürümün panelde gösterilen hali: güvenli "
+                                                      "HTML (başlık, madde, fıkra, tablo, resim, sayfa görüntüsü) ve sayfa sayfa okunuşu.",
+                                                      HERKES, {**H401, **H404}),
+    ("GET", "/panel/api/arsiv/mevzuat/{anahtar}/fark"): ("Sürüm farkı", "`eski` ve `yeni` sürümün madde madde farkı: değişti (kelime "
+                                                   "düzeyinde <ins>/<del>), eklendi, kaldırıldı, mülga; sayaçlarıyla.", HERKES,
+                                                   {**H401, **H404}),
+    ("GET", "/panel/api/arsiv/mevzuat/{anahtar}/pdf"): ("Sürümün PDF'i", "`tur=site` sitenin PDF'i (asıl ya da sitenin ürettiği), "
+                                                  "`tur=metin` metnin okunduğu PDF. `indir=1` ise indirilir, değilse tarayıcıda açılır.",
+                                                  HERKES, {**H401, **H404}),
+    ("GET", "/panel/api/arsiv/dosya/{ozet}"): ("Arşivdeki dosya", "Ek, arşivden çıkan dosya ya da gövde resmi, SHA-256 özetiyle. Her zaman "
+                                         "orijinal dosya ve orijinal adı verilir.", HERKES, {**H401, **H404}),
+    ("GET", "/panel/api/arsiv/dosya/{ozet}/gorunum"): ("Ekin görünümü", "Ekin panelde gösterilen hali (tablolarıyla HTML), arşivse "
+                                                 "içindekiler, okunamadıysa nedeni.", HERKES, {**H401, **H404}),
+    ("GET", "/panel/api/arsiv/goruntu"): ("Sayfa görüntüsü", "PDF'ten kesilmiş sayfa ya da tablo görüntüsü (harita, taranmış tablo), `yol` ile.",
+                                    HERKES, {**H401, **H404}),
+    ("GET", "/panel/api/arsiv/gunluk/{istek_id}"): ("Arşiv işinin günlüğü", "İşin özeti (sonuçlara göre sayılar, kusurlular, hatalar, en "
+                                              "yavaşlar) ve mevzuat başına kayıtlar (adımlar, süreler, uyarılar). `sadece=hata|uyari`.",
+                                              HERKES, {**H401, **H404}),
     # --- kullanıcılar ve denetim
     ("GET", "/panel/api/kullanicilar"): ("Kullanıcılar", "Panel kullanıcıları, rolleri, son girişleri, durumları.", YONETICI,
                                    {**H401, **H403}),

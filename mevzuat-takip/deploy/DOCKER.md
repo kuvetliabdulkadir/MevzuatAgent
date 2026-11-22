@@ -81,6 +81,39 @@ docker compose exec -T db pg_restore -U mevzuat -d mevzuat --clean --if-exists <
 docker compose start panel zamanlayici
 ```
 
+Arşivin dosyaları (`arsiv` birimi) aynı yedek servisiyle her gece `./yedekler/arsiv/` altına kopyalanır (sadece yeni
+dosyalar; dosyalar içeriklerinin özetiyle adlandırılır, hiç değişmez). Geri yükleme:
+
+```sh
+docker compose stop panel zamanlayici
+docker run --rm -v mevzuat_arsiv:/hedef -v "$PWD/yedekler/arsiv:/kaynak:ro" debian:bookworm-slim cp -a /kaynak/. /hedef/
+docker compose start panel zamanlayici
+```
+
+### 3.2 Mevzuat arşivi (tam tarama ve teslim)
+
+Arşiv mevzuat.gov.tr'deki yürürlükteki bütün mevzuatı metni, yapısı, ekleri, sayfa resimleri ve sitenin PDF'iyle
+saklar (ayrıntı: `src/mevzuat/arsiv.py`, `arsiv_cekim.py`; plan: `mevzuat-arsiv-plani.md`).
+
+- **Disk:** tam tarama ~10-12 GB dosya (PDF, ek, resim, sayfa görüntüsü) + veritabanında ~2 GB metin ve görünüm.
+  Yedek de bir o kadar tutar. Başlamadan önce en az **30 GB boş** olmalı: `df -h /var/lib/docker .`
+- **Süre:** ~40.000+ istek, istekler arası en az 1,5 sn (site zorlanırsa kendiliğinden açılır) + taranmış sayfaların
+  OCR'ı (çekirdek sayısına göre paralel, `MEVZUAT_OCR_PARALEL`, varsayılan çekirdeklerin yarısı). Toplam 1-3 gün.
+  Zamanlayıcı ya da sunucu yeniden başlarsa iş kendiliğinden kaldığı yerden devam eder.
+- **Başlatma:** panelde Arşiv → bütün türler → Başlat. Ya da: `docker compose exec zamanlayici python -m mevzuat.cli arsiv-kur`
+- **İzleme:** panelde ilerleme ve "İş günlüğü" (hatalar, uyarılar, kusurlular, en yavaşlar). Ham günlük:
+  `docker compose exec panel ls /app/arsiv/gunluk/`
+- **Önce deneme:** sorunlu kayıtlarla (plan dosyasındaki deneme seti) ve liste adımı olmadan:
+  `docker compose exec zamanlayici python -m mevzuat.cli arsiv-kur --anahtar 20.5.5123 9.5.19302 ...`
+  (anahtarların arşivde olması için önce bir kez liste alınmış olmalı: `arsiv-kur --tur Kanun` gibi.)
+- **Teslim kontrolü:** `docker compose exec panel python -m mevzuat.cli arsiv-kontrol` (sadece okur; rapor
+  `/app/arsiv/kontrol/` altına; zorunlu ölçütlerden biri tutmazsa çıkış kodu 1). `--sha` her dosyanın özetini de doğrular.
+- **Katlama (teslim tabanı, karar 19):** deneme çalıştırmalarından kalan ara sürümler varsa, önce yedek alıp
+  (`docker compose restart yedek`, bitmesini bekleyin) sonra `docker compose exec panel python -m mevzuat.cli arsiv-katla --onay`.
+  Her mevzuatın son sürümü v1 olur. Teslimden sonra sürüm silinmez.
+- **Teslim:** `pg_dump` yedeği (`yedekler/`) ve `yedekler/arsiv/` klasörü projeyle birlikte verilir; karşı tarafta
+  bölüm 3.1'deki iki geri yükleme komutu çalıştırılır.
+
 ## 4. Canlı demo (hoca önünde, ~5 dakika)
 
 ```sh

@@ -48,6 +48,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from mevzuat import (
     alicilar,
+    arsiv,
     gecmis,
     kaynak_bulucu,
     kaynak_yonetimi,
@@ -114,7 +115,7 @@ VARSAYILAN_ARAYUZ = Path(__file__).parents[3] / "frontend" / "dist"
 GUVENLIK_BASLIKLARI = {
     # Sadece kendi dosyalarımız, dış script/stil/font yok, satır içi script yok. Başka sitede çerçeveye alınamaz.
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-    "font-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    "font-src 'self'; connect-src 'self'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
@@ -293,6 +294,13 @@ class ZamanlamaIstegi(BaseModel):
     model_config = ConfigDict(json_schema_extra={"examples": [{"saatler": ["06:30", "12:00", "18:00"], "surum": 2}]})
     saatler: list[str] = Field(max_length=10)
     surum: int
+
+
+# Arşiv işi başlatma isteği. Tür verilmezse bütün türler.
+class ArsivBaslatIstegi(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"turler": ["Kanun"], "yeniden": False}]})
+    turler: list[str] | None = Field(default=None, max_length=20)
+    yeniden: bool = False
 
 
 # "Önceki hale döndür" isteği.
@@ -1148,6 +1156,158 @@ def uygulama_olustur(
             db.commit()
             return zamanlama.tarama_durumu(db)
 
+    # --- mevzuat arşivi (arsiv.py). Herkes görür, başlatmak ve durdurmak ayar yetkisi ister.
+
+    # Arşivin özeti, son işin durumu ve ilerlemesi.
+    @api.get("/arsiv/durum")
+    def arsiv_durumu(request: Request):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            return {**arsiv.arsiv_durumu(db),
+                    "zamanlayici_calisiyor": zamanlama.zamanlayici_durumu(db)["zamanlayici_calisiyor"]}
+
+    # Arşiv işini başlatır. Panel sadece istek yazar, işi zamanlayıcı başlatır.
+    @api.post("/arsiv/baslat")
+    def arsiv_baslat(request: Request, istek: ArsivBaslatIstegi):
+        with Oturum() as db:
+            kullanici = ayar_yetkisi(request, db)
+            try:
+                kayit = arsiv.istek_olustur(db, kullanici.id, istek.turler, istek.yeniden,
+                                            zamanlama.zamanlayici_durumu(db)["zamanlayici_calisiyor"])
+            except ValueError as e:
+                db.rollback()
+                raise HTTPException(409, str(e))
+            denetle(db, "arsiv_istegi", kullanici.id, ip(request), istek_id=kayit.id, **kayit.secenekler)
+            db.commit()
+            return arsiv_durumu(request)
+
+    # Çalışan arşiv işini durdurur (sıradaki mevzuattan sonra durur, yeniden başlatılınca kaldığı yerden devam eder).
+    @api.post("/arsiv/durdur")
+    def arsiv_durdur(request: Request):
+        with Oturum() as db:
+            kullanici = ayar_yetkisi(request, db)
+            try:
+                kayit = arsiv.durdur(db)
+            except ValueError as e:
+                db.rollback()
+                raise HTTPException(409, str(e))
+            denetle(db, "arsiv_durdur", kullanici.id, ip(request), istek_id=kayit.id)
+            db.commit()
+            return arsiv_durumu(request)
+
+    # Arşiv listesi, arama ve süzme ile.
+    @api.get("/arsiv/liste")
+    def arsiv_listesi(request: Request, ara: str = "", tur: str = "", durum: str = "", sayfa: int = 1):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            return arsiv.liste(db, ara[:200], tur, durum, sayfa)
+
+    # Bir mevzuatın künyesi ve sürümleri.
+    @api.get("/arsiv/mevzuat/{anahtar}")
+    def arsiv_detay(request: Request, anahtar: str):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            sonuc = arsiv.detay(db, anahtar)
+            if sonuc is None:
+                raise HTTPException(404, "Arşivde böyle bir mevzuat yok.")
+            return sonuc
+
+    # Bir sürümün metni (sürüm verilmezse en sonuncusu).
+    @api.get("/arsiv/mevzuat/{anahtar}/metin")
+    def arsiv_metin(request: Request, anahtar: str, surum: int | None = None):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            sonuc = arsiv.metin(db, anahtar, surum)
+            if sonuc is None:
+                raise HTTPException(404, "Bu mevzuatın arşivde metni yok.")
+            return sonuc
+
+    # Bir sürümün panelde gösterilen hali (başlıklar, maddeler, tablolar, resimler, sayfa görüntüleri).
+    @api.get("/arsiv/mevzuat/{anahtar}/gorunum")
+    def arsiv_gorunum(request: Request, anahtar: str, surum: int | None = None):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            sonuc = arsiv.gorunum(db, anahtar, surum, f"{PANEL_ON_EK}/arsiv")
+            if sonuc is None:
+                raise HTTPException(404, "Bu mevzuatın arşivde metni yok.")
+            return sonuc
+
+    # İki sürümün madde madde farkı.
+    @api.get("/arsiv/mevzuat/{anahtar}/fark")
+    def arsiv_fark(request: Request, anahtar: str, eski: int, yeni: int):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            sonuc = arsiv.fark(db, anahtar, eski, yeni)
+            if sonuc is None:
+                raise HTTPException(404, "Bu sürümler arşivde yok.")
+            return sonuc
+
+    # Arşivden dosya cevabı. Panelde açılacaksa (PDF, resim) sadece kendi sayfamızın çerçevesinde gösterilebilir,
+    # diğer her şey indirilir. Ad her zaman orijinal dosyanın adı, içerik hiç değiştirilmez (karar 26).
+    def arsiv_dosya_cevabi(yol: Path, ad: str, bicim: str, indir: bool) -> FileResponse:
+        turler = {"pdf": "application/pdf", "resim": None}
+        tur = turler.get(bicim)
+        satir_ici = not indir and bicim in turler
+        cevap = FileResponse(yol, media_type=tur, filename=ad,
+                             content_disposition_type="inline" if satir_ici else "attachment")
+        # Satır içi PDF panelin "Orijinal" sekmesinde çerçevede açılır; başka site çerçeveye alamaz.
+        cevap.headers["Content-Security-Policy"] = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; " \
+                                                   "frame-ancestors 'self'"
+        cevap.headers["Cache-Control"] = "private, max-age=3600"
+        return cevap
+
+    # Arşivdeki bir dosya (ek, arşivden çıkan dosya, gövde resmi), özetiyle. `indir=1` ise her zaman indirilir.
+    @api.get("/arsiv/dosya/{ozet}")
+    def arsiv_dosya(request: Request, ozet: str, indir: bool = False):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            bulunan = arsiv.dosya_bul(db, ozet)
+        if bulunan is None or bulunan[0] is None:
+            raise HTTPException(404, "Arşivde böyle bir dosya yok.")
+        return arsiv_dosya_cevabi(*bulunan, indir)
+
+    # Bir ekin panelde gösterilen hali (tablolarıyla), arşivse içindekiler.
+    @api.get("/arsiv/dosya/{ozet}/gorunum")
+    def arsiv_dosya_gorunumu(request: Request, ozet: str):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            sonuc = arsiv.ek_gorunumu(db, ozet, f"{PANEL_ON_EK}/arsiv")
+            if sonuc is None:
+                raise HTTPException(404, "Arşivde böyle bir dosya yok.")
+            return sonuc
+
+    # PDF sayfa ve tablo görüntüleri (harita, taranmış tablo).
+    @api.get("/arsiv/goruntu")
+    def arsiv_goruntu(request: Request, yol: str):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+        tam = arsiv.goruntu_bul(yol)
+        if tam is None:
+            raise HTTPException(404, "Görüntü yok.")
+        cevap = FileResponse(tam, media_type="image/png")
+        cevap.headers["Cache-Control"] = "private, max-age=86400"
+        return cevap
+
+    # Bir sürümün PDF'i: `tur=site` sitenin PDF'i (asıl ya da sitenin ürettiği), `tur=metin` metnin okunduğu PDF.
+    @api.get("/arsiv/mevzuat/{anahtar}/pdf")
+    def arsiv_pdf(request: Request, anahtar: str, surum: int | None = None, tur: str = "site", indir: bool = False):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            bulunan = arsiv.surum_pdf(db, anahtar, surum, "metin" if tur == "metin" else "site")
+        if bulunan is None:
+            raise HTTPException(404, "Bu sürümün PDF'i arşivde yok.")
+        return arsiv_dosya_cevabi(bulunan[0], bulunan[1], "pdf", indir)
+
+    # Bir arşiv işinin ayrıntılı günlüğü: özet ve kayıtlar (`sadece=hata|uyari`).
+    @api.get("/arsiv/gunluk/{istek_id}")
+    def arsiv_gunlugu(request: Request, istek_id: int, sadece: str = "", adet: int = 200):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            sonuc = arsiv.is_gunlugu(db, istek_id, sadece, adet)
+            if sonuc is None:
+                raise HTTPException(404, "Böyle bir arşiv işi yok.")
+            return sonuc
+
     # --- kullanıcı yönetimi ve denetim kaydı (sadece admin, kurtarma işleri, rol kararı 2026-10-02)
 
     # Sadece admin'in yapabildiği işler için kontrol, yetkisiz deneme denetime yazılır.
@@ -1475,6 +1635,28 @@ def uygulama_olustur(
     # konu ve alıcı grubu panelin aynı fonksiyonlarıyla ama sabit cevap biçimiyle (web/portal.py).
     portal_yolu = portal.portal_api(Oturum, giris_gerekli, [Depends(csrf_dogrula), Depends(imza_kontrol),
                                                              *anahtar_semalari])
+    from mevzuat.web import portal_entegrasyon
+    portal_entegrasyon.ekle(portal_yolu, Oturum, giris_gerekli, rapor_detay, {
+        "liste": lambda r, ad, v: kaynak_listesi(r),
+        "tipler": lambda r, ad, v: kaynak_tipleri(r),
+        "ekle": lambda r, ad, v: kaynak_ekle(r, KaynakIstegi.model_validate(v)),
+        "duzenle": lambda r, ad, v: kaynak_degistir(r, ad, KaynakIstegi.model_validate(v)),
+        "dene": lambda r, ad, v: kaynak_dene(r, KaynakIstegi.model_validate(v)),
+        "bul": lambda r, ad, v: kaynak_bul(r, AdresIstegi.model_validate(v)),
+        "kaldir": lambda r, ad, v: kaynak_kaldir(r, ad, SurumIstegi.model_validate(v)),
+        "geri_getir": lambda r, ad, v: kaynak_geri_getir(r, ad, SurumIstegi.model_validate(v)),
+    }, {
+        "liste": lambda r, kid, v: konu_listesi(r),
+        "onizleme": lambda r, kid, v: konu_onizleme(r, KonuIstegi.model_validate(v)),
+        "ekle": lambda r, kid, v: konu_ekle(r, KonuIstegi.model_validate(v)),
+        "duzenle": lambda r, kid, v: konu_degistir(r, kid, KonuIstegi.model_validate(v)),
+        "aktif": lambda r, kid, v: konu_aktif(r, kid, SurumIstegi.model_validate(v)),
+        "pasif": lambda r, kid, v: konu_pasif(r, kid, SurumIstegi.model_validate(v)),
+    }, {
+        "durum": lambda r, v: tarama_durumu(r),
+        "baslat": lambda r, v: tarama_iste(r),
+        "saatler": lambda r, v: zamanlama_degistir(r, ZamanlamaIstegi.model_validate(v)),
+    }, gizli_anahtar=gizli_anahtar, rapor_isletim=(ayar, make_client))
     surumlu = portal.yazma_adreslerini_ekle(portal_yolu, api.routes, panel_belgesi.BELGE, API_GRUPLARI)
     # Her uç noktanın başlığı, açıklaması, yetkisi ve hata cevapları (web/panel_belgesi.py). dış adreslere açılan panel
     # adresleri dokümanda tekrar görünmez, panel onları kullanmaya devam eder.

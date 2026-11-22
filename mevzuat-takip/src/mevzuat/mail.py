@@ -3,7 +3,7 @@
 
 Ayarlar ortam değişkenlerinden okunur.
   MEVZUAT_SMTP_HOST      yoksa mail gönderilmez, giden_mailler klasörüne dosya olarak yazılır
-  MEVZUAT_SMTP_PORT      varsayılan 587 (STARTTLS)
+  MEVZUAT_SMTP_PORT      varsayılan 587 (STARTTLS); 465 verilirse bağlantı baştan SSL (SMTPS) açılır
   MEVZUAT_SMTP_KULLANICI
   MEVZUAT_SMTP_SIFRE     Gmail için normal şifre değil "Uygulama Şifresi" girilir, 2 adımlı doğrulama gerekir
   MEVZUAT_SMTP_GONDEREN  varsayılan olarak kullanıcı adı
@@ -74,6 +74,10 @@ def mesaj_olustur(mail: Mail, gonderen: str) -> EmailMessage:
     return msg
 
 
+# Bu portta bağlantı baştan SSL açılır (SMTPS, "implicit TLS"); diğer portlarda STARTTLS kullanılır.
+SMTPS_PORTU = 465
+
+
 # Gerçek mail sunucusu (SMTP) üzerinden gönderen sınıf.
 class SmtpGonderici:
     # Sunucu bilgilerini sakla. deneme, bağlantı sorununda kaç kez deneneceği.
@@ -88,11 +92,17 @@ class SmtpGonderici:
         # 1'den 3'e kadar dene.
         for i in range(1, self.deneme + 1):
             try:
-                # Sunucuya bağlan (60 saniye zaman aşımı).
-                smtp = smtplib.SMTP(self.host, self.port, timeout=60)
+                # Sunucuya bağlan (60 saniye zaman aşımı). 465 (SMTPS): bağlantı baştan SSL, STARTTLS yok;
+                # düz SMTP ile bağlanılırsa sunucu karşılama yazmaz ve bağlantıyı kapatır. Diğer portlar: STARTTLS.
+                baglam = ssl.create_default_context()
+                if self.port == SMTPS_PORTU:
+                    smtp = smtplib.SMTP_SSL(self.host, self.port, timeout=60, context=baglam)
+                else:
+                    smtp = smtplib.SMTP(self.host, self.port, timeout=60)
                 try:
-                    # Bağlantıyı şifreli hale getir, giriş yap, maili gönder.
-                    smtp.starttls(context=ssl.create_default_context())
+                    # Bağlantıyı şifreli hale getir (465'te zaten şifreli), giriş yap, maili gönder.
+                    if self.port != SMTPS_PORTU:
+                        smtp.starttls(context=baglam)
                     smtp.login(self.kullanici, self.sifre)
                     smtp.send_message(msg)
                 finally:

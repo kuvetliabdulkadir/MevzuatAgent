@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 from enum import Enum
 
 import httpx
-from selectolax.parser import HTMLParser
+from selectolax.lexbor import LexborHTMLParser as HTMLParser
 
 from mevzuat.icerik import Icerik, belge_icerigi
 from mevzuat.sources.base import KayitTaslagi, TaramaAdimi

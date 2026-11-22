@@ -443,3 +443,217 @@ export interface ApiAnahtarlariCevabi {
   anahtar?: string;
   mesaj?: Mesaj;
 }
+
+// Mevzuat arşivi (/panel/api/arsiv/...).
+export type ArsivIstekDurumu = 'BEKLIYOR' | 'CALISIYOR' | 'DURDURULUYOR' | 'BITTI' | 'DURDURULDU' | 'HATALI';
+export type ArsivMetinDurumu = 'BEKLIYOR' | 'TAMAM' | 'OCR_GEREKLI' | 'SITEDE_YOK' | 'HATA';
+
+export interface ArsivIlerleme {
+  asama: 'liste' | 'metin' | 'bitti';
+  tur?: string | null;
+  turler: string[];
+  yeniden: boolean;
+  liste: Record<string, { alinan: number; toplam: number | null; yeni?: number; geri_gelen?: number; kalkan?: number; eksik?: string }>;
+  metin: {
+    toplam: number; biten: number; yeni_surum: number; okuma_duzeltmesi?: number; ayni?: number; hata: number;
+    sitede_yok?: number; ocr_gerekli: number; kusurlu?: number;
+  };
+  son?: { anahtar: string; ad: string };
+  guncellendi?: string;
+  gunluk?: string | null;
+  istek_araligi?: number | null;
+}
+
+export interface ArsivIstegi {
+  id: number;
+  durum: ArsivIstekDurumu;
+  istendi: string;
+  basladi: string | null;
+  bitti: string | null;
+  isteyen: string | null;
+  secenekler: { turler?: string[]; yeniden?: boolean; anahtarlar?: string[]; esik?: string; devam_eden?: number };
+  ilerleme: ArsivIlerleme | null;
+  hata: string | null;
+}
+
+export interface ArsivDurumu {
+  istek: ArsivIstegi | null;
+  turler: { kod: string; ad: string; sayilar: Partial<Record<ArsivMetinDurumu, number>>; toplam: number; kalkan: number }[];
+  toplam: number;
+  surum_toplam: number;
+  baslangic: string | null;
+  zamanlayici_calisiyor: boolean;
+}
+
+export interface ArsivKunye {
+  anahtar: string;
+  ad: string;
+  tur: string;
+  tur_adi: string;
+  url: string;
+  bicim: 'html' | 'pdf';
+  rg_tarihi: string | null;
+  rg_sayisi: number | null;
+  mulga: boolean;
+  kalkti: string | null;
+  durum: ArsivMetinDurumu;
+  surum_sayisi: number;
+  son_cekim: string | null;
+  son_hata: string | null;
+  ilk_gorulme: string;
+  kalite: 'temiz' | 'kusurlu' | null;
+}
+
+export interface ArsivListesi {
+  toplam: number;
+  sayfa: number;
+  boyut: number;
+  satirlar: ArsivKunye[];
+}
+
+export interface ArsivEkIcDosya {
+  ad: string;
+  sha256: string | null;
+  boyut: number | null;
+  bicim: string | null;
+  durum: string | null;
+}
+
+export interface ArsivEk {
+  ad: string;
+  boyut: number | null;
+  sha256: string | null;
+  // indi / sitede_yok / ulasilamadi / kaynakta_bozuk
+  durum: string;
+  bicim: string | null;
+  // tamam / gorunum_yok / hata
+  okuma: string | null;
+  gorunum_var: boolean;
+  not: string | null;
+  denenen: { url: string; sonuc: string }[];
+  ic: ArsivEkIcDosya[];
+}
+
+export type ArsivSurumTuru = 'ilk' | 'degisiklik' | 'okuma_duzeltmesi';
+
+export interface ArsivSurumu {
+  surum_no: number;
+  cekildi: string;
+  okuma: string;
+  uzunluk: number;
+  surum_turu: ArsivSurumTuru;
+  kalite: 'temiz' | 'kusurlu';
+  kalite_notlari: string[];
+  okuyucu_surumu: number;
+  pdf: boolean;
+  site_pdf: boolean;
+  site_pdf_turu: 'asil' | 'uretilen' | null;
+  gorunum_var: boolean;
+  sayfa_sayisi: number;
+  sayfa_yontemleri: Record<string, number>;
+  resim_sayisi: number;
+  ekler: ArsivEk[];
+  rg_yeni: { tarih: string; sayi: string }[];
+}
+
+export interface ArsivDetayi extends ArsivKunye {
+  surumler: ArsivSurumu[];
+}
+
+export interface ArsivMetni {
+  anahtar: string;
+  surum_no: number;
+  cekildi: string;
+  okuma: string;
+  metin: string;
+}
+
+export interface ArsivSayfa {
+  no: number;
+  yontem: string;
+  karakter: number;
+  uyari: string[];
+  goruntu: string | null;
+  tablo_yapi: number;
+  tablo_goruntu: number;
+}
+
+export interface ArsivGorunumu {
+  anahtar: string;
+  surum_no: number;
+  okuma: string;
+  gorunum: string;
+  sayfalar: ArsivSayfa[];
+}
+
+export interface ArsivFarkBolumu {
+  bolum: string;
+  tur: 'ayni' | 'degisti' | 'eklendi' | 'kaldirildi' | 'mulga';
+  html: string;
+  eski: string | null;
+  yeni: string | null;
+}
+
+export interface ArsivFarki {
+  anahtar: string;
+  eski: number;
+  yeni: number;
+  eski_cekildi: string;
+  yeni_cekildi: string;
+  yeni_surum_turu: ArsivSurumTuru;
+  sayac: { degisti: number; eklendi: number; kaldirildi: number; mulga: number };
+  bolumler: ArsivFarkBolumu[];
+}
+
+export interface ArsivEkGorunumu {
+  sha256: string;
+  ad: string;
+  bicim: string;
+  boyut: number;
+  durum: string;
+  notlar: string[];
+  gorunum: string | null;
+  ic: ArsivEkIcDosya[];
+  sayfalar: ArsivSayfa[];
+}
+
+export interface ArsivGunlukKaydi {
+  zaman: string;
+  anahtar: string;
+  sonuc: string;
+  sure?: number;
+  okuma?: string;
+  karakter?: number;
+  kalite?: string;
+  kusurlar?: string[];
+  uyarilar?: string[];
+  adimlar?: { adim: string; sure: number; [k: string]: unknown }[];
+  hata?: string;
+  neden?: string;
+  sayfa?: number;
+  ocr_sayfa?: number;
+  gorsel_sayfa?: number;
+  ek?: number;
+  ek_inmeyen?: number;
+  resim?: number;
+}
+
+export interface ArsivGunlugu {
+  istek: ArsivIstegi;
+  ozet: {
+    sonuc: Record<string, number>;
+    okuma: Record<string, number>;
+    kusurlu: string[];
+    hata: { anahtar: string; hata: string }[];
+    ek_inmeyen: number;
+    en_yavas: { anahtar: string; sure: number }[];
+    istek: number;
+    sayfa: number;
+    ocr_sayfa: number;
+    gorsel_sayfa: number;
+    tablo_yapi: number;
+    tablo_goruntu: number;
+  };
+  kayitlar: ArsivGunlukKaydi[];
+  toplam: number;
+}

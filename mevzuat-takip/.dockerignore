@@ -1,12 +1,15 @@
 # İmaja girmeyecekler: sırlar, yerel veritabanı, sanal ortam, derleme artıkları.
 .env
 *.db
+*.db-wal
+*.db-shm
 .venv
 .git
 .pytest_cache
 **/__pycache__
 **/node_modules
 giden_mailler
+arsiv
 rapor_onizleme.*
 mevzuat.lock
 docs

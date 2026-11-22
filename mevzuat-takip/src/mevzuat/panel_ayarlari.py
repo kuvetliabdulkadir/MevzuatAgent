@@ -48,7 +48,8 @@ class Alan:
 ALANLAR: tuple[Alan, ...] = (
     Alan("smtp_host", "MEVZUAT_SMTP_HOST", "metin", "Mail sunucusu", "SMTP sunucusu",
          "Ör. smtp.gmail.com. Boşsa mail gönderilmez, sunucuda giden_mailler klasörüne yazılır."),
-    Alan("smtp_port", "MEVZUAT_SMTP_PORT", "sayi", "Mail sunucusu", "SMTP portu", "Genelde 587 (STARTTLS).",
+    Alan("smtp_port", "MEVZUAT_SMTP_PORT", "sayi", "Mail sunucusu", "SMTP portu",
+         "Genelde 587 (STARTTLS) ya da 465 (baştan SSL).",
          587, 1, 65535),
     Alan("smtp_kullanici", "MEVZUAT_SMTP_KULLANICI", "metin", "Mail sunucusu", "SMTP kullanıcı adı",
          "Gmail'de mail adresinin kendisi."),

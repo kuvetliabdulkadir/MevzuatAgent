@@ -43,7 +43,17 @@ KARISIK = FIXTURES / "rg_20260918-8_karisik.pdf"  # 6 sayfa: metin + 3. ve 4. sa
 def test_karisik_pdf_ocr_yoksa_eksik_isaretlenir():
     icerik = belge_icerigi(KARISIK.read_bytes(), "application/pdf")
     assert icerik.ocr_gerekli and not icerik.ocr_ile
-    assert len(icerik.metin) > 1000  # metin kısmı yine de var
+    # Bu PDF'in yazı katmanı "(cid:N)" çöpü (font haritası yok), çöp metin olarak saklanmaz.
+    assert "(cid:" not in icerik.metin
+
+
+def test_bozuk_font_yazisi_cop_sayilir():
+    from mevzuat.icerik import bozuk_yazi_mi, temiz_sayfa_yazisi
+
+    assert bozuk_yazi_mi("(cid:5)(cid:7)(cid:25)(cid:10)(cid:21) MADDE")
+    assert temiz_sayfa_yazisi("(cid:5)(cid:7)(cid:25)(cid:10)(cid:21)") == ""
+    assert not bozuk_yazi_mi("MADDE 1 – Bu Karar yayımı tarihinde yürürlüğe girer. (cid:3)")
+    assert temiz_sayfa_yazisi("  Normal metin  ") == "Normal metin"
 
 
 @pytest.mark.ocr
@@ -63,7 +73,7 @@ def test_karisik_pdf_sadece_gorsel_sayfalar_ocrlanir(monkeypatch):
 
     monkeypatch.setattr(ocr, "sayfalari_ocr", kaydet)
     oncesi = belge_icerigi(KARISIK.read_bytes(), "application/pdf")
-    assert istenen == [[2, 3]]  # sadece görsel sayfalar, tüm belge değil
+    assert istenen == [[0, 1, 2, 3, 4, 5]]  # yazı katmanı çöp olduğu için her sayfa okunur
     assert oncesi.ocr_ile and not oncesi.ocr_gerekli
 
 

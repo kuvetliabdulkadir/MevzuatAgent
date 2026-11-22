@@ -20,3 +20,14 @@ pg_restore --list "$DOSYA" > /dev/null
 # Eski yedekleri sil (sadece bu script'in ürettikleri).
 find "$HEDEF" -name 'mevzuat_*.dump' -mtime +"$SAKLA_GUN" -delete
 echo "yedek: $DOSYA ($(du -h "$DOSYA" | cut -f1))"
+
+# Arşivin dosyaları (PDF, ek, resim, sayfa görüntüsü, günlük) veritabanı yedeğine girmez. Dosyalar içeriklerinin özetiyle
+# adlandırılır ve hiç değiştirilmez, bu yüzden sadece yeni ve değişen (günlük) dosyalar kopyalanır; ilk seferde ~10 GB.
+# Arşiv silinmez kuralı (karar 19) gereği yedekten de silinmez. MEVZUAT_ARSIV_KAYNAK boşsa (Docker'sız kurulumda
+# arşiv başka yerdeyse orayı verin) atlanır.
+ARSIV=${MEVZUAT_ARSIV_KAYNAK:-}
+if [ -n "$ARSIV" ] && [ -d "$ARSIV" ]; then
+  mkdir -p "$HEDEF/arsiv"
+  cp -a -u "$ARSIV/." "$HEDEF/arsiv/"
+  echo "arşiv yedeği: $HEDEF/arsiv ($(du -sh "$HEDEF/arsiv" | cut -f1))"
+fi

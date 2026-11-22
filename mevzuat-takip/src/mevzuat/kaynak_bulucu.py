@@ -22,7 +22,7 @@ from urllib.parse import urlencode, urljoin, urlsplit
 
 import httpx
 # Node, HTML ağacındaki tek bir düğüm (etiket).
-from selectolax.parser import HTMLParser, Node
+from selectolax.lexbor import LexborHTMLParser as HTMLParser, LexborNode as Node
 
 from mevzuat.filtre import tr_kucuk
 from mevzuat.http import make_client

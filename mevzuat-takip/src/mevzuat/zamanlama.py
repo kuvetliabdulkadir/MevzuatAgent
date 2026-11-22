@@ -8,7 +8,9 @@ Zamanlayıcı 30 saniyede bir uyanır ve şunları yapar.
   2. Saatleri DB'den okur, değiştiyse sonraki hedefi yeniden hesaplar.
   3. Vakti geldiyse günlük işi ayrı bir süreç olarak başlatır, böylece iş çökse ya da bellek şişse de zamanlayıcı ayakta kalır.
   4. Panelden "Şimdi tara" isteği bekliyorsa ve tarama sürmüyorsa onu başlatır, bitince sonucu isteğe yazar.
-  5. Nabız yazar, panel bununla zamanlayıcının çalışıp çalışmadığını ve sonraki taramanın ne zaman olduğunu görür, tarama sürerken de.
+  5. Panelden "Arşivi oluştur" isteği bekliyorsa ve arşiv işi sürmüyorsa onu ayrı bir süreçte başlatır (arsiv.py).
+     Arşiv işi saatler sürer, günlük taramayla aynı anda çalışabilir.
+  6. Nabız yazar, panel bununla zamanlayıcının çalışıp çalışmadığını ve sonraki taramanın ne zaman olduğunu görür, tarama sürerken de.
 Planlı çalışmalara 0 ile 10 dakika arasında rastgele gecikme eklenir, devlet sitelerine tam dakikasında yüklenmemek için.
 
 Kaçan çalışma, systemd'deki Persistent ayarının karşılığı. Zamanlayıcı açıldığında son planlı saatten beri hiç çalışma
@@ -40,7 +42,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from mevzuat.db import Calisma, Kullanici, SistemAyari, TaramaIstegi
+from mevzuat import arsiv
+from mevzuat.db import ArsivIstegi, Calisma, Kullanici, SistemAyari, TaramaIstegi
 
 log = logging.getLogger("mevzuat.zamanlayici")
 
@@ -298,6 +301,12 @@ def gunluk_baslat(istek_id: int | None) -> subprocess.Popen:
     return subprocess.Popen([sys.executable, "-m", "mevzuat.cli", "gunluk"], env=ortam)
 
 
+# Arşiv işini ayrı bir süreç olarak başlatır ("python -m mevzuat.cli arsiv-kur --istek N").
+def arsiv_baslat(istek_id: int) -> subprocess.Popen:
+    """Arşiv işi saatler sürer, günlük taramadan ayrı süreçtir. İkisi aynı anda çalışabilir, planlı tarama beklemez."""
+    return subprocess.Popen([sys.executable, "-m", "mevzuat.cli", "arsiv-kur", "--istek", str(istek_id)])
+
+
 # Zamanlayıcının kendisi.
 class Zamanlayici:
     """Test edilebilsin diye saat, rastgelelik ve süreç başlatma dışarıdan verilebilir. `adim` tek bir uyanışı çalıştırır."""
@@ -311,8 +320,14 @@ class Zamanlayici:
         saat: Callable[[], datetime] = datetime.now,
         # Rastgele gecikmeyi veren fonksiyon (0-600 sn).
         gecikme: Callable[[], float] = lambda: random.uniform(0, EN_FAZLA_GECIKME),
+        # Arşiv işini başlatan fonksiyon (testte sahte olabilir).
+        arsiv_baslat: Callable[[int], subprocess.Popen] = arsiv_baslat,
     ):
         self.engine, self.baslat, self.saat, self.gecikme = engine, baslat, saat, gecikme
+        self.arsiv_baslat = arsiv_baslat
+        # Şu an çalışan arşiv süreci ve isteği (yoksa None).
+        self.arsiv_surec: subprocess.Popen | None = None
+        self.arsiv_istek_id: int | None = None
         # Bilinen tarama saatleri.
         self.saatler: list[Saat] = []
         # Bir sonraki taramanın zamanı.
@@ -347,6 +362,9 @@ class Zamanlayici:
             # Zamanlayıcı tarama sürerken durduysa o istek yarım kaldı, kullanıcı yeniden isteyebilsin.
             session.execute(update(TaramaIstegi).where(TaramaIstegi.durum == "CALISIYOR").values(
                 durum="HATALI", bitti=simdi, hata="Zamanlayıcı tarama sürerken yeniden başladı; tekrar deneyin."))
+            # Arşiv işi de yarım kaldıysa kendiliğinden kaldığı yerden devam eder (yeni istek sıraya girer).
+            if devam := arsiv.yarim_kalanlari_devam_ettir(session, simdi):
+                log.info("Yarım kalan arşiv işi kendiliğinden devam ettiriliyor (istek #%d)", devam.id)
             session.commit()
         log.info("Zamanlayıcı başladı; çalışma saatleri (Türkiye): %s", ", ".join(saat_metni(self.saatler)))
         self.baz = simdi
@@ -386,6 +404,14 @@ class Zamanlayici:
             # Tarama sürmüyorsa bekleyen "Şimdi tara" isteği var mı bak.
             if self.surec is None:
                 self._istegi_al(session, simdi)
+            # Arşiv işi bittiyse sonucunu yaz, süreç sonucu kendisi yazamadan öldüyse istek HATALI olur.
+            if self.arsiv_surec is not None and self.arsiv_surec.poll() is not None:
+                log.info("Arşiv işi bitti (çıkış kodu %d)", self.arsiv_surec.returncode)
+                arsiv.istegi_sonuclandir(session, self.arsiv_istek_id, self.arsiv_surec.returncode, simdi)
+                self.arsiv_surec, self.arsiv_istek_id = None, None
+            # Arşiv işi sürmüyorsa bekleyen arşiv isteği var mı bak.
+            if self.arsiv_surec is None:
+                self._arsiv_istegini_al(session, simdi)
             # Son olarak nabız yaz.
             nabiz_yaz(session, simdi, "tarama" if self.surec is not None else "bekliyor", self.hedef, self.saatler)
 
@@ -413,6 +439,29 @@ class Zamanlayici:
                        hata=f"Tarama süreci başlatılamadı: {e!r}"[:2000])
             return
         self.istek_id = istek.id
+
+    # Bekleyen arşiv isteğini alıp arşiv sürecini başlatır ("Şimdi tara" ile aynı yol).
+    def _arsiv_istegini_al(self, session: Session, simdi: datetime) -> None:
+        istek = session.scalar(select(ArsivIstegi).where(ArsivIstegi.durum == "BEKLIYOR")
+                               .order_by(ArsivIstegi.id).limit(1))
+        if istek is None:
+            return
+        alindi = session.execute(update(ArsivIstegi)
+                                 .where(ArsivIstegi.id == istek.id, ArsivIstegi.durum == "BEKLIYOR")
+                                 .values(durum="CALISIYOR", basladi=simdi)).rowcount
+        session.commit()
+        if alindi != 1:
+            return
+        log.info("Arşiv işi başlıyor (panelden istek #%d)", istek.id)
+        try:
+            self.arsiv_surec = self.arsiv_baslat(istek.id)
+        except Exception as e:
+            log.exception("Arşiv işi başlatılamadı (istek #%d)", istek.id)
+            session.execute(update(ArsivIstegi).where(ArsivIstegi.id == istek.id).values(
+                durum="HATALI", bitti=simdi, hata=f"Arşiv süreci başlatılamadı: {e!r}"[:2000]))
+            session.commit()
+            return
+        self.arsiv_istek_id = istek.id
 
     # Sonsuz döngü, kur, sonra 30 saniyede bir adım at.
     def calis(self, hemen: bool = False, uyu: Callable[[float], None] = time.sleep) -> None:

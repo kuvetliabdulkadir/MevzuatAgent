@@ -27,8 +27,12 @@ ENV PYTHONUNBUFFERED=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv
 
 # Sistem paketleri: OCR için Tesseract + Türkçe dil dosyası; saat dilimi verisi.
-RUN apt-get update \
+# Arşivin ekleri için (karar 23): LibreOffice (arayüzsüz; eski .doc/.xls/.ppt/.rtf'yi docx/xlsx/pptx'e çevirir, ~500 MB)
+# ve libarchive-tools (bsdtar; .rar ve .7z açar). Yazı tipi, çeviride harf kaybı olmasın diye.
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-tur tzdata \
+       libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui libarchive-tools fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # uv'nin resmi imajından sadece çalıştırılabilir dosya alınır (sürüm sabit: her derlemede aynı araç).
@@ -60,8 +64,8 @@ RUN python -m pytest -q
 FROM taban AS uygulama
 # Root olmayan kullanıcı: uygulamada bir açık olsa bile container içinde sistem dosyalarına yazamaz.
 RUN useradd --system --uid 10001 --no-create-home --home-dir /app mevzuat \
-    && mkdir -p /app/giden_mailler \
-    && chown mevzuat:mevzuat /app/giden_mailler
+    && mkdir -p /app/giden_mailler /app/arsiv \
+    && chown mevzuat:mevzuat /app/giden_mailler /app/arsiv
 USER mevzuat
 # Dosya kilidi (aynı anda tek günlük iş) yazılabilir bir yerde olmalı.
 ENV MEVZUAT_KILIT=/tmp/mevzuat.lock

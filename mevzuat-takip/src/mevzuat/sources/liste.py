@@ -22,7 +22,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 # selectolax, HTML'i hızlıca okuyup CSS seçiciyle içinden parça bulmamızı sağlayan kütüphane.
-from selectolax.parser import HTMLParser
+from selectolax.lexbor import LexborHTMLParser as HTMLParser, SelectolaxError
 
 # tr_kucuk Türkçe'ye uygun küçük harfe çevirir, büyük İ küçük i olur, büyük I küçük ı olur.
 from mevzuat.filtre import tr_kucuk
@@ -172,7 +172,8 @@ class ListeKaynagi:
             if alan != "liste_url":
                 try:
                     HTMLParser("<html></html>").css(deger)
-                except ValueError as e:
+                # Lexbor yanlış yazılmış seçicide kendi hatasını (SelectolaxError) verir.
+                except (ValueError, SelectolaxError) as e:
                     raise ValueError(f"{alan} seçicisi geçersiz: {deger!r}") from e
         # Kontrol geçti, ayarları nesnenin üstüne kaydet.
         self.ad = ad

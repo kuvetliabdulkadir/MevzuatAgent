@@ -1,7 +1,7 @@
 // Sol menü. Öğeler veritabanından gelir (/panel/api/menu), sunucu sadece kullanıcının yetkisine uyanları gönderir.
 import React, { useEffect, useState } from 'react';
 import {
-  BookOpen, Circle, Clock, ExternalLink, FileCheck2, Globe, History, Info, KeyRound, Layers, LucideIcon, Mail, Settings,
+  Archive, BookOpen, Circle, Clock, ExternalLink, FileCheck2, Globe, History, Info, KeyRound, Layers, LucideIcon, Mail, Settings,
   Users, X,
 } from 'lucide-react';
 import { api } from '../api';
@@ -9,13 +9,13 @@ import { Kullanici, MenuOgesi } from '../types/api';
 
 // Arayüzde karşılığı olan sayfaların adları.
 const SEKMELER = [
-  'raporlar', 'gruplar', 'kaynaklar', 'konular', 'tarama', 'kullanicilar', 'denetim', 'ayarlar', 'api_anahtarlari', 'api',
+  'raporlar', 'gruplar', 'kaynaklar', 'konular', 'tarama', 'arsiv', 'kullanicilar', 'denetim', 'ayarlar', 'api_anahtarlari', 'api',
 ] as const;
 export type ActiveTab = (typeof SEKMELER)[number];
 
 // Veritabanındaki ikon adından ikona, tanınmayan ad için daire çıkar.
 const IKONLAR: Record<string, LucideIcon> = {
-  BookOpen, Clock, FileCheck2, Globe, History, KeyRound, Layers, Mail, Settings, Users,
+  Archive, BookOpen, Clock, FileCheck2, Globe, History, KeyRound, Layers, Mail, Settings, Users,
 };
 
 interface SidebarProps {

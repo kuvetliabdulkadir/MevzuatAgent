@@ -29,6 +29,9 @@ x-uygulama: &uygulama
     # değişiklik: ayar-ice-aktar). izlenen_mevzuat.toml her çalışmada buradan okunur.
     - ./config:/app/config:ro
     - giden_mailler:/app/giden_mailler
+    # Arşivin PDF, ek, resim ve sayfa görüntüsü dosyaları (arsiv.py, MEVZUAT_ARSIV_KLASORU). Yaklaşık 10-12 GB.
+    # Veritabanı yedeğine girmez; yedek servisi her gece ./yedekler/arsiv'e kopyalar.
+    - arsiv:/app/arsiv
   depends_on:
     db:
       condition: service_healthy
@@ -85,9 +88,12 @@ services:
       TZ: Europe/Istanbul
       MEVZUAT_YEDEK_KLASORU: /yedekler
       MEVZUAT_YEDEK_SAATI: ${MEVZUAT_YEDEK_SAATI:-03:00}
+      MEVZUAT_ARSIV_KAYNAK: /arsiv
     volumes:
       - ./deploy:/deploy:ro
       - ./yedekler:/yedekler
+      # Arşivin dosyaları (salt okunur), her gece yeni olanlar ./yedekler/arsiv'e kopyalanır.
+      - arsiv:/arsiv:ro
     command: ["sh", "/deploy/yedek-docker.sh"]
     depends_on:
       db:
@@ -97,3 +103,4 @@ services:
 volumes:
   pgdata:
   giden_mailler:
+  arsiv:

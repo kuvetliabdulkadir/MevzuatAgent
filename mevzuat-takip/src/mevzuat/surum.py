@@ -40,7 +40,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urljoin, urlparse
 
 import httpx
-from selectolax.parser import HTMLParser
+from selectolax.lexbor import LexborHTMLParser as HTMLParser
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

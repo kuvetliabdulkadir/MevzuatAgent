@@ -573,6 +573,48 @@ def test_smtp_quit_hatasi_gonderilmis_maili_tekrar_gondertmez(monkeypatch):
     assert len(gonderilen) == 1
 
 
+def _sahte_smtp_siniflari(olaylar: list):
+    class SahteSMTP:
+        def __init__(self, host, port, **k): olaylar.append(("SMTP", port))
+        def starttls(self, **k): olaylar.append(("starttls",))
+        def login(self, *a): olaylar.append(("login",))
+        def send_message(self, msg): olaylar.append(("gonder",))
+        def quit(self): pass
+        def close(self): pass
+
+    class SahteSMTPSSL(SahteSMTP):
+        def __init__(self, host, port, **k):
+            assert k.get("context") is not None  # sertifika doğrulaması olan bağlam verilmeli
+            olaylar.append(("SMTP_SSL", port))
+    return SahteSMTP, SahteSMTPSSL
+
+
+def test_smtp_465_baglantiyi_bastan_ssl_acar_starttls_yapmaz(monkeypatch):
+    import smtplib
+
+    from mevzuat.mail import SmtpGonderici
+
+    olaylar: list = []
+    smtp, smtp_ssl = _sahte_smtp_siniflari(olaylar)
+    monkeypatch.setattr(smtplib, "SMTP", smtp)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", smtp_ssl)
+    SmtpGonderici("h", 465, "k", "s", "g@x.com").gonder(Mail("K", "<p>x</p>", "x", ["a@b.com"]))
+    assert olaylar == [("SMTP_SSL", 465), ("login",), ("gonder",)]
+
+
+def test_smtp_587_starttls_kullanir(monkeypatch):
+    import smtplib
+
+    from mevzuat.mail import SmtpGonderici
+
+    olaylar: list = []
+    smtp, smtp_ssl = _sahte_smtp_siniflari(olaylar)
+    monkeypatch.setattr(smtplib, "SMTP", smtp)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", smtp_ssl)
+    SmtpGonderici("h", 587, "k", "s", "g@x.com").gonder(Mail("K", "<p>x</p>", "x", ["a@b.com"]))
+    assert olaylar == [("SMTP", 587), ("starttls",), ("login",), ("gonder",)]
+
+
 # ---- alıcı grupları ------------------------------------------------------------------------------
 
 from mevzuat import alicilar  # noqa: E402

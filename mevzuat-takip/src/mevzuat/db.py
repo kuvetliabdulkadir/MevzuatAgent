@@ -9,7 +9,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 
-from sqlalchemy import JSON, ForeignKey, Index, MetaData, String, Text, UniqueConstraint, create_engine, false, text
+from sqlalchemy import JSON, ForeignKey, event, Index, MetaData, String, Text, UniqueConstraint, create_engine, false, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -275,6 +275,132 @@ class MetinSurumu(Base):
     metin: Mapped[str] = mapped_column(Text)
 
 
+# Mevzuat arşivi, mevzuat.gov.tr'de listelenen her mevzuat için bir satır. Ayrıntı: src/mevzuat/arsiv.py
+class ArsivMevzuat(Base):
+    """Arşivdeki bir mevzuatın künyesi. Anahtar çoğunlukla tür.tertip.no (1.5.4760), genelgelerde "genelge.20261114-13".
+    Satır silinmez. Siteden düşen mevzuat iki tam listede üst üste görünmezse `kalkti` dolar."""
+
+    __tablename__ = "arsiv_mevzuat"
+
+    anahtar: Mapped[str] = mapped_column(String(100), primary_key=True)
+    # Sitenin listeleme servisindeki tür adı (Kanun, TumYonetmelik, Teblig ...).
+    tur: Mapped[str] = mapped_column(String(60), index=True)
+    ad: Mapped[str] = mapped_column(Text)
+    rg_tarihi: Mapped[date | None]
+    rg_sayisi: Mapped[int | None]
+    # Mevzuatın sitedeki sayfası ya da PDF'i.
+    url: Mapped[str] = mapped_column(Text)
+    bicim: Mapped[str] = mapped_column(String(10))  # html / pdf
+    # Sitenin "mülga" listesinden geldiyse yürürlükte değil.
+    mulga: Mapped[bool] = mapped_column(default=False)
+    ilk_gorulme: Mapped[datetime]
+    son_gorulme: Mapped[datetime]
+    # Tam listede üst üste kaç kez görünmedi, 2 olunca kalktı sayılır.
+    kayip_sayisi: Mapped[int] = mapped_column(default=0)
+    kalkti: Mapped[datetime | None]
+    # Metnin durumu, BEKLIYOR, TAMAM, OCR_GEREKLI (PDF taranmış, OCR yapılamadı), SITEDE_YOK (sitenin kendisi
+    # vermiyor, nedeni son_hata'da) ya da HATA. Eski kayıtlarda BOS da olabilir (SITEDE_YOK'un eski adı).
+    durum: Mapped[str] = mapped_column(String(20), index=True)
+    deneme: Mapped[int] = mapped_column(default=0)
+    son_hata: Mapped[str | None] = mapped_column(Text)
+    son_cekim: Mapped[datetime | None]
+    surum_sayisi: Mapped[int] = mapped_column(default=0)
+    # Son sürümün okuma kalitesi, temiz ya da kusurlu (okunamayan sayfa, bozuk karakter). Listede süzmek için.
+    kalite: Mapped[str | None] = mapped_column(String(20), index=True)
+
+
+# Arşivdeki mevzuatın metin sürümleri, v1, v2, v3. Eski sürüm silinmez.
+class ArsivSurumu(Base):
+    """Metin ya da eklerden biri değişince yeni sürüm olur. `ozet` metnin ve eklerin birlikte SHA-256 özeti.
+    PDF ve ek dosyalarının kendisi diskte durur (MEVZUAT_ARSIV_KLASORU), burada yolları ve özetleri durur."""
+
+    __tablename__ = "arsiv_surumleri"
+    __table_args__ = (UniqueConstraint("anahtar", "surum_no"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anahtar: Mapped[str] = mapped_column(ForeignKey("arsiv_mevzuat.anahtar"), index=True)
+    surum_no: Mapped[int]
+    cekildi: Mapped[datetime]
+    ozet: Mapped[str] = mapped_column(String(64))
+    metin: Mapped[str] = mapped_column(Text)
+    # Metin nereden okundu: html, html+resim (metni resim olan sayfa), html+ek (asıl metin ekte), pdf_metin (PDF'in
+    # yazı katmanı), ocr, karisik (bazı sayfalar OCR), okunamadi / ocr_gerekli (OCR yapılamadı).
+    okuma: Mapped[str] = mapped_column(String(20))
+    # Metnin okunduğu PDF (PDF'i olan mevzuatta sitenin PDF'i, HTML'i boş olup PDF'ten okunanda o PDF).
+    pdf_yolu: Mapped[str | None] = mapped_column(String(500))
+    # Ek dosyaları, [{ad, href, url, sha256, boyut, yol, bicim, durum, denenen, ic}]. Ayrıntı: arsiv_cekim.ek_indir.
+    ekler: Mapped[list] = mapped_column(JSON, default=list)
+    # --- okuyucu sürümü 2 (2026-11-22) ile eklenenler. Eski sürümlerde boş ya da varsayılan.
+    # Metni hangi okuyucu sürümü üretti (arsiv_cekim.OKUYUCU_SURUMU).
+    okuyucu_surumu: Mapped[int] = mapped_column(default=1)
+    # ilk, degisiklik (kaynak değişti) ya da okuma_duzeltmesi (kaynak aynı, okuma yöntemi iyileşti, karar 19).
+    surum_turu: Mapped[str] = mapped_column(String(20), default="ilk")
+    # temiz ya da kusurlu, kusurların listesi kalite_notlari'nda.
+    kalite: Mapped[str] = mapped_column(String(20), default="temiz")
+    kalite_notlari: Mapped[list] = mapped_column(JSON, default=list)
+    # Sitenin verdiği ham kaynağın (HTML gövdesi, PDF, ekler, resimler) özeti. Değişiklik ile okuma düzeltmesini ayırır.
+    kaynak_ozeti: Mapped[str | None] = mapped_column(String(64))
+    # Panelde gösterilecek güvenli HTML (paragraflar, tablolar, resim ve sayfa görüntüsü yer tutucuları).
+    gorunum: Mapped[str | None] = mapped_column(Text)
+    # Görsel sayfaların ve anlamsız OCR bloklarının yazısı: metne girmez, sadece arama için.
+    arama_metni: Mapped[str | None] = mapped_column(Text)
+    # PDF'in sayfa sayfa okunuşu [{no, yontem, karakter, uyari, goruntu, tablo_yapi, tablo_goruntu}].
+    sayfalar: Mapped[list] = mapped_column(JSON, default=list)
+    # HTML gövdesindeki resimler [{src, url, sha256, boyut, yol, durum, ocr}].
+    resimler: Mapped[list] = mapped_column(JSON, default=list)
+    # Sitenin PDF'i (karar 27): asil (sitede kayıtlı PDF) ya da uretilen (sitenin o an HTML'den ürettiği).
+    site_pdf_yolu: Mapped[str | None] = mapped_column(String(500))
+    site_pdf_turu: Mapped[str | None] = mapped_column(String(20))
+    # Metindeki "(Değişik: RG-15/12/2026-33461)" notları, [{bolum, tur, tarih, sayi}] (karar 25).
+    rg_notlari: Mapped[list] = mapped_column(JSON, default=list)
+
+
+# Arşivdeki her dosyanın (ek, arşiv içinden çıkan dosya, sayfa resmi) okunmuş hali. Aynı dosya bir kez işlenir.
+class ArsivDosyasi(Base):
+    """Orijinal dosya diskte `yol`da durur, hiç değiştirilmez ("İndir" onu verir). `metin` arama ve fark için,
+    `gorunum` paneldeki okunur hal. `ic` arşiv dosyasıysa içinden çıkanlar [{ad, sha256, boyut, yol, bicim, durum}]."""
+
+    __tablename__ = "arsiv_dosyalari"
+
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    ad: Mapped[str] = mapped_column(String(500))  # ilk görüldüğü adı (indirilirken bu adla verilir)
+    bicim: Mapped[str] = mapped_column(String(20))
+    boyut: Mapped[int]
+    yol: Mapped[str] = mapped_column(String(500))
+    # tamam / gorunum_yok (çevirici yok ya da biçim tanınmadı) / hata.
+    durum: Mapped[str] = mapped_column(String(20))
+    metin: Mapped[str | None] = mapped_column(Text)
+    gorunum: Mapped[str | None] = mapped_column(Text)
+    notlar: Mapped[list] = mapped_column(JSON, default=list)
+    ic: Mapped[list] = mapped_column(JSON, default=list)
+    sayfalar: Mapped[list] = mapped_column(JSON, default=list)
+    okuyucu_surumu: Mapped[int] = mapped_column(default=1)
+    islendi: Mapped[datetime]
+
+
+# Panelden gelen "arşivi oluştur" istekleri. Panel sadece istek yazar, işi zamanlayıcı ayrı süreçte başlatır.
+class ArsivIstegi(Base):
+    """Durum BEKLIYOR, CALISIYOR, DURDURULUYOR (panelden durdur denildi), BITTI, DURDURULDU ya da HATALI olur.
+    `secenekler` {turler, yeniden}, `ilerleme` işin nerede olduğu (aşama, tür, kaç bitti)."""
+
+    __tablename__ = "arsiv_istekleri"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    isteyen_id: Mapped[int | None] = mapped_column(ForeignKey("kullanicilar.id"))
+    istendi: Mapped[datetime]
+    basladi: Mapped[datetime | None]
+    bitti: Mapped[datetime | None]
+    durum: Mapped[str] = mapped_column(String(20), index=True)
+    secenekler: Mapped[dict] = mapped_column(JSON, default=dict)
+    ilerleme: Mapped[dict | None] = mapped_column(JSON)
+    hata: Mapped[str | None] = mapped_column(Text)
+
+    # Aynı anda en fazla bir aktif arşiv işi.
+    __table_args__ = (Index("uq_arsiv_istekleri_tek_aktif", text("(1)"), unique=True,
+                            postgresql_where=text("durum IN ('BEKLIYOR', 'CALISIYOR', 'DURDURULUYOR')"),
+                            sqlite_where=text("durum IN ('BEKLIYOR', 'CALISIYOR', 'DURDURULUYOR')")),)
+
+
 # Panelden yönetilen kaynak tanımlarının tablosu.
 class KaynakTanimi(Base):
     """Taranan kaynak. İlk kurulumda config/kaynaklar.toml dosyasından bir kez aktarılır, sonra panelden yönetilir.
@@ -411,7 +537,17 @@ class MenuOgesi(Base):
 
 # Veritabanı bağlantısını kurar (.env'deki adres, yoksa yerel SQLite dosyası).
 def make_engine(url: str | None = None) -> Engine:
-    return create_engine(url or os.environ.get("MEVZUAT_DB_URL", VARSAYILAN_DB_URL))
+    motor = create_engine(url or os.environ.get("MEVZUAT_DB_URL", VARSAYILAN_DB_URL))
+    if motor.dialect.name == "sqlite":
+        # Zamanlayıcı, arşiv işi ve panel aynı dosyaya yazıyor. Varsayılan ayarda kilit hemen "database is locked"
+        # hatası verir. WAL okuyanla yazanı birbirinden bağımsız kılar, busy_timeout ise kilitte hata yerine bekletir.
+        @event.listens_for(motor, "connect")
+        def _sqlite_ayarla(dbapi_baglanti, _kayit):
+            imlec = dbapi_baglanti.cursor()
+            imlec.execute("PRAGMA journal_mode=WAL")
+            imlec.execute("PRAGMA busy_timeout=60000")
+            imlec.close()
+    return motor
 
 
 # Alembic'in ayarlarını kodla hazırlar (migration dosyalarının yeri ve veritabanı adresi).
