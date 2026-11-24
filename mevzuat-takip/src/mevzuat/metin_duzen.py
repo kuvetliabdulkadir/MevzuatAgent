@@ -121,7 +121,7 @@ def _sozlukle_bol(harfler: str) -> list[str] | None:
     if en_iyi[n] is None:
         return None
     sinirlar = [0] + en_iyi[n]
-    return [harfler[a:b] for a, b in zip(sinirlar, sinirlar[1:])]
+    return [harfler[a:b] for a, b in zip(sinirlar, sinirlar[1:], strict=False)]
 
 
 def _aralikli_birlestir(satir: str) -> str:
@@ -186,7 +186,7 @@ def _yapi_satiri(satir: str) -> bool:
 # Satır tamamen büyük harfli kısa bir başlık mı ("AMAÇ, KAPSAM VE TANIMLAR").
 def _baslik_satiri(satir: str) -> bool:
     harfler = [c for c in satir if c.isalpha()]
-    return 3 <= len(harfler) and len(satir) <= 120 and all(c.isupper() for c in harfler)
+    return len(harfler) >= 3 and len(satir) <= 120 and all(c.isupper() for c in harfler)
 
 
 # PDF ve OCR metninde sayfa düzeninden gelen satır sonlarını birleştirir, paragrafları "\n" ile ayırır.

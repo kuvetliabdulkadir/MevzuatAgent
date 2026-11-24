@@ -502,6 +502,8 @@ export interface ArsivKunye {
   son_hata: string | null;
   ilk_gorulme: string;
   kalite: 'temiz' | 'kusurlu' | null;
+  // Konu filtresine göre ilgili olduğu konular (listede).
+  konular?: string[];
 }
 
 export interface ArsivListesi {
@@ -556,8 +558,43 @@ export interface ArsivSurumu {
   rg_yeni: { tarih: string; sayi: string }[];
 }
 
-export interface ArsivDetayi extends ArsivKunye {
+export interface ArsivKanit {
+  kelime: string;
+  bolum: string;
+  tur: 'baslik' | 'amac' | 'tanim' | 'govde' | 'dayanak' | string;
+  parca: string;
+}
+
+export interface ArsivDetayi extends Omit<ArsivKunye, 'konular'> {
   surumler: ArsivSurumu[];
+  konular: { konu: string; kanit: ArsivKanit[] }[];
+}
+
+export interface ArsivAramaSonucu {
+  sorgu: string;
+  terimler: string[];
+  toplam: number;
+  sayfa: number;
+  boyut: number;
+  eksik: boolean;
+  sonuclar: {
+    anahtar: string;
+    ad: string;
+    tur: string;
+    rg_tarihi: string | null;
+    baslikta: boolean;
+    madde_sayisi: number;
+    gecis: number;
+    // parca sunucuda kaçışlanmış HTML, sadece <mark> içerir.
+    parcalar: { bolum: string; parca: string }[];
+  }[];
+}
+
+export interface ArsivKonulari {
+  konular: { ad: string; ilgili: number }[];
+  toplam_ilgili: number;
+  guncel: boolean;
+  hesaplandi: string | null;
 }
 
 export interface ArsivMetni {

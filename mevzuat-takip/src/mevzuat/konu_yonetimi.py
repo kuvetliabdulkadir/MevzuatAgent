@@ -154,9 +154,10 @@ def uyarilar(session: Session, form: KonuFormu, konu_id: int | None) -> list[str
 
 # "Etkisini gör", kaydedilmemiş yeni tanımı son 90 günün başlıklarına uygular, şimdiki tanımla karşılaştırır.
 def onizleme(session: Session, form: KonuFormu, konu_id: int | None, bugun: date | None = None) -> dict:
-    """Kaydedilmemiş tanımı son 90 günün başlıklarına uygular ve şimdiki tanımla karşılaştırır.
-    Yeni tanımla eşleşecek ama şimdi eşleşmeyen, ve şimdi eşleşen ama düşecek başlıkları, hangi kelimeyle olduğunu da göstererek döner.
-    Sadece başlığa bakılır. İçerikten genişletme sadece içeriği indirilen kayıtlarda olur, önizlemede yoktur."""
+    """Kaydedilmemiş tanımı son 90 günün kayıtlarına uygular ve şimdiki tanımla karşılaştırır.
+    Yeni tanımla eşleşecek ama şimdi eşleşmeyen, ve şimdi eşleşen ama düşecek kayıtları, hangi kelimeyle olduğunu da göstererek döner.
+    Taramayla aynı kural: başlık, içeriği indirilmiş kayıtta içerik puanı da (puan.py)."""
+    from mevzuat import arama
     form = temizle(form)
     # Yeni (formdaki) tanım.
     yeni = konu_olustur(form.ad, form.kelimeler, form.is_kollari, form.haric, form.dislanan)
@@ -168,13 +169,15 @@ def onizleme(session: Session, form: KonuFormu, konu_id: int | None, bugun: date
     digerleri = [konu_olustur(k.ad, k.kelimeler, k.is_kollari, k.haric, k.dislanan)
                  for k in session.scalars(select(KonuTanimi).where(KonuTanimi.aktif)) if k.id != konu_id]
     sinir = (bugun or date.today()) - timedelta(days=ONIZLEME_GUN)
+    agirlik = arama.kelime_agirliklari(session)
     eslesecek, dusecek, ayni, taranan = [], [], 0, 0
     # Son 90 günün her kaydı için eski ve yeni tanımla eşleşme durumunu karşılaştır.
     for kayit in session.scalars(select(Kayit).where(Kayit.yayin_tarihi >= sinir)
                                  .order_by(Kayit.yayin_tarihi.desc(), Kayit.id.desc())):
         taranan += 1
-        once = _eslesen(kayit.baslik, eski)
-        sonra = _eslesen(kayit.baslik, yeni)
+        belge = _Belge(kayit)
+        once = _eslesen(kayit, eski, agirlik, belge)
+        sonra = _eslesen(kayit, yeni, agirlik, belge)
         # Durum değişmediyse (ikisinde de eşleşiyor ya da ikisinde de eşleşmiyor) sadece say.
         if bool(once) == bool(sonra):
             ayni += bool(sonra)
@@ -185,7 +188,7 @@ def onizleme(session: Session, form: KonuFormu, konu_id: int | None, bugun: date
         if sonra:
             eslesecek.append(satir)
         else:
-            satir["baska_konular"] = sorted(eslesmeler(kayit.baslik, digerleri))
+            satir["baska_konular"] = sorted(k.ad for k in digerleri if _eslesen(kayit, k, agirlik, belge))
             dusecek.append(satir)
     return {"gun": ONIZLEME_GUN, "taranan": taranan, "ayni_kalan": ayni,
             "eslesecek_sayisi": len(eslesecek), "dusecek_sayisi": len(dusecek),
@@ -193,9 +196,38 @@ def onizleme(session: Session, form: KonuFormu, konu_id: int | None, bugun: date
             "uyarilar": uyarilar(session, form, konu_id)}
 
 
-# Bir başlığın tek bir konuyla eşleşen kelimeleri (konu yoksa boş).
-def _eslesen(baslik: str, konu: Konu | None) -> list[str]:
-    return eslesmeler(baslik, [konu]).get(konu.ad, []) if konu else []
+# Bir kaydın tek bir konuyla eşleşen kelimeleri (konu yoksa boş): başlıktakiler, içerik puanı eşiği geçtiyse içerikteki kanıtlar.
+def _eslesen(kayit: Kayit, konu: Konu | None, agirlik: dict[str, float], belge: "_Belge") -> list[str]:
+    from mevzuat import pipeline
+
+    if konu is None:
+        return []
+    baslikta = eslesmeler(kayit.baslik, [konu])
+    if not kayit.icerik or not belge.konu_gecebilir(konu):
+        return baslikta.get(konu.ad, [])
+    return pipeline.icerikle_eslesmeler(kayit.baslik, kayit.icerik, [konu], baslikta, agirlik,
+                                        belge=belge.hazir()).get(konu.ad, [])
+
+
+class _Belge:
+    """Önizlemede kaydın puan belgesi bir kez ve sadece gerekirse hazırlanır (90 günün metinleri)."""
+
+    def __init__(self, kayit: Kayit):
+        self.kayit = kayit
+        self._kucuk = None
+        self._belge = None
+
+    def konu_gecebilir(self, konu: Konu) -> bool:
+        if self._kucuk is None:
+            self._kucuk = tr_kucuk(self.kayit.icerik or "")
+        return any(k.rstrip("*")[:max(3, len(k.rstrip("*")) - 2)] in self._kucuk for k in konu.kelimeler)
+
+    def hazir(self):
+        from mevzuat import puan
+
+        if self._belge is None:
+            self._belge = puan.belge_hazirla(self.kayit.baslik, self.kayit.icerik or "")
+        return self._belge
 
 
 # ---- kaydetme -------------------------------------------------------------------------------------------

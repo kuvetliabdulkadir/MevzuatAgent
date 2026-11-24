@@ -80,6 +80,7 @@ export const MevzuatPenceresi: React.FC<{ anahtar: string; onKapat: () => void }
                   sitede aç <ExternalLink className="w-3 h-3" /></a>
               </p>
             )}
+            {detay && detay.konular.length > 0 && <IlgiliKonular konular={detay.konular} />}
             {detay?.kalkti && (
               <p className="mt-1 inline-block px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-semibold">
                 Siteden kalktı ({tarihSaat(detay.kalkti)}). Son metin aşağıda.
@@ -121,6 +122,30 @@ export const MevzuatPenceresi: React.FC<{ anahtar: string; onKapat: () => void }
     </div>
   );
 };
+
+const KANIT_YERI: Record<string, string> = { baslik: 'başlıkta', amac: 'amaç/kapsamda', tanim: 'tanımlarda', govde: 'metinde' };
+
+// Konu filtresine göre ilgili olduğu konular ve "neden" (kanıt: hangi kelime, nerede, hangi cümlede). Puan gösterilmez (karar 18).
+const IlgiliKonular: React.FC<{ konular: ArsivDetayi['konular'] }> = ({ konular }) => (
+  <div className="mt-1.5 flex flex-wrap items-start gap-1.5">
+    <span className="text-stone-500 py-0.5">İlgili:</span>
+    {konular.map((k) => (
+      <details key={k.konu} className="group">
+        <summary className="list-none cursor-pointer px-1.5 py-0.5 rounded bg-petrol/10 text-petrol font-semibold hover:bg-petrol/20">
+          {k.konu} <span className="font-normal text-stone-500 group-open:hidden">· neden?</span>
+        </summary>
+        <ul className="mt-1 mb-1 p-2 rounded-lg border border-paper-300 bg-paper-50 space-y-1 max-w-2xl">
+          {k.kanit.map((x, i) => (
+            <li key={i} className="text-stone-700">
+              <span className="font-semibold">"{x.kelime}"</span> {KANIT_YERI[x.tur] ?? x.tur}
+              {x.tur !== 'baslik' && <span className="text-stone-500"> ({x.bolum})</span>}: <span className="text-stone-600">{x.parca}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
+    ))}
+  </div>
+);
 
 // Sürüm şeridi: v1 · v2 · v3, tarihleriyle. Okuma düzeltmeleri soluk.
 const SurumSeridi: React.FC<{ surumler: ArsivSurumu[]; secili: number | null; onSec: (n: number) => void }> = ({ surumler, secili, onSec }) => {

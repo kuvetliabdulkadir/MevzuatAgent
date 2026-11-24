@@ -164,6 +164,36 @@ def test_resmi_gazetede_yakalanan_belge_tekrar_ilgili_olmaz():
         assert kayitlar["m2"].ilgili and "Vergi" in kayitlar["m2"].eslesmeler
 
 
+def test_baska_kaynaktaki_ayni_belge_tekrar_sayilir():
+    """Kaynaktan bağımsız: numara yazımı ("No:" / "TEBLİĞ NO:") ve duyuru kuyruğu farkı aynı belge sayılır, ±3 gün."""
+    engine = create_engine("sqlite://")
+    init_db(engine)
+    with Session(engine) as s:
+        calisma = Calisma(id=1, baslangic=SIMDI, durum="CALISIYOR", ozet={})
+        s.add(calisma)
+        for dis_id, baslik in (("rg1", "İthalatta Haksız Rekabetin Önlenmesine İlişkin Tebliğ (No: 2026/31)"),
+                               ("rg2", "VERGİ USUL KANUNU GENEL TEBLİĞİ (SIRA NO: 597)")):
+            s.add(Kayit(kaynak="resmi_gazete", dis_id=dis_id, yayin_tarihi=date(2026, 10, 1), baslik=baslik, tur="",
+                        bolum="", mukerrer=0, url="u", kaynakca="k", ilgili=True, eslesmeler={}, is_kollari=[],
+                        icerik_durumu="TAMAM", ilk_gorulme=SIMDI, calisma_id=1))
+        s.commit()
+        konular = konulari_yukle(Path(__file__).parents[1] / "config" / "konular.toml")
+        mgov = kaynak_olustur("mevzuat_gov_yeni", "mevzuat_gov", {})
+        gib = kaynak_olustur("duyuru_sitesi", "mevzuat_gov", {})  # tip önemsiz, kural kaynaktan bağımsız
+
+        def ekle(kaynak, baslik: str, dis_id: str, gun: int) -> Kayit:
+            pipeline._ekle(s, kaynak, KayitTaslagi(dis_id=dis_id, yayin_tarihi=date(2026, 10, gun), baslik=baslik,
+                                                   url=dis_id, kaynakca="k"), konular, calisma)
+            s.commit()
+            return s.query(Kayit).filter_by(dis_id=dis_id).one()
+
+        assert not ekle(mgov, "İTHALATTA HAKSIZ REKABETİN ÖNLENMESİNE İLİŞKİN TEBLİĞ (TEBLİĞ NO: 2026/31)", "m1", 3).ilgili
+        assert ekle(mgov, "İTHALATTA HAKSIZ REKABETİN ÖNLENMESİNE İLİŞKİN TEBLİĞ (TEBLİĞ NO: 2026/32)", "m2", 3).ilgili
+        assert not ekle(gib, "Vergi Usul Kanunu Genel Tebliği (Sıra No: 597) Resmi Gazete’de Yayımlandı", "g1", 2).ilgili
+        assert ekle(gib, "Vergi Usul Kanunu Genel Tebliği (Sıra No: 597) Resmi Gazete’de Yayımlandı", "g2", 9).ilgili
+    assert pipeline._sade_baslik("Tebliğ (No: 2026/31)") == pipeline._sade_baslik("TEBLİĞ (TEBLİĞ NO: 2026/31)")
+
+
 def test_migration_kurulu_sisteme_kaynagi_ekler(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'eski.db'}")
     command.upgrade(alembic_config(engine.url.render_as_string(hide_password=False)), "0016")

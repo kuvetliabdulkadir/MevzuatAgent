@@ -35,139 +35,188 @@ def _cumle_ortasi_orani(metin: str) -> float:
     satirlar = [s for s in metin.split("\n") if s.strip()]
     if len(satirlar) < 5:
         return 0.0
-    kirik = sum(1 for a, b in zip(satirlar, satirlar[1:])
+    kirik = sum(1 for a, b in zip(satirlar, satirlar[1:], strict=False)
                 if re.search(rf"[{md.HARF},]$", md.kucuk(a.rstrip())) and re.match(rf"[{md.HARF}]", md.kucuk(b.lstrip())))
     return kirik / len(satirlar)
 
 
-def kontrol(session: Session, klasor: Path, sha_dogrula: bool = False) -> dict:
-    sonuc: dict = {"zaman": datetime.now().isoformat(timespec="seconds"), "zorunlu": {}, "gozden_gecir": {}, "sayilar": {}}
-    z, g, s = sonuc["zorunlu"], sonuc["gozden_gecir"], sonuc["sayilar"]
+class Rapor:
+    """Kontrol sonuçlarını toplar: zorunlu ölçütler, gözden geçirilecekler (her biri en fazla LISTE_SINIRI örnek) ve sayılar.
+    Diskte olması gereken dosya yolları da burada birikir (eksik ve sahipsiz dosya kontrolü için)."""
 
-    def ekle(hedef: dict, ad: str, deger) -> None:
-        hedef.setdefault(ad, [])
-        if len(hedef[ad]) < LISTE_SINIRI:
-            hedef[ad].append(deger)
+    def __init__(self):
+        self.zorunlu: dict[str, list] = {}
+        self.gozden_gecir: dict[str, list] = {}
+        self.sayilar: dict = {}
+        self.dosya_yollari: set[str] = set()
 
-    # Kayıtlar.
-    kayitlar = {m.anahtar: m for m in session.scalars(select(ArsivMevzuat))}
-    s["mevzuat"] = len(kayitlar)
-    s["durum"] = dict(Counter(m.durum for m in kayitlar.values()))
-    s["tur"] = dict(Counter(m.tur for m in kayitlar.values()))
-    s["kalkti"] = sum(1 for m in kayitlar.values() if m.kalkti)
+    @staticmethod
+    def _ekle(hedef: dict[str, list], ad: str, deger) -> None:
+        liste = hedef.setdefault(ad, [])
+        if len(liste) < LISTE_SINIRI:
+            liste.append(deger)
+
+    # Zorunlu ölçütü bozan bulgu (teslimden önce 0 olmalı).
+    def hata(self, ad: str, deger) -> None:
+        self._ekle(self.zorunlu, ad, deger)
+
+    # Tek tek gözden geçirilecek bulgu.
+    def bak(self, ad: str, deger) -> None:
+        self._ekle(self.gozden_gecir, ad, deger)
+
+    def dosya(self, yol: str | None) -> None:
+        if yol:
+            self.dosya_yollari.add(yol)
+
+    def sozluk(self) -> dict:
+        return {"zaman": datetime.now().isoformat(timespec="seconds"), "zorunlu": self.zorunlu,
+                "gozden_gecir": self.gozden_gecir, "sayilar": self.sayilar,
+                "sayac": {"zorunlu": {k: len(v) for k, v in self.zorunlu.items()},
+                          "gozden_gecir": {k: len(v) for k, v in self.gozden_gecir.items()}},
+                "hatasiz": not any(self.zorunlu.values())}
+
+
+# Kaydın durumu bu ise zorunlu bulgu.
+_DURUM_BULGUSU = {"BEKLIYOR": "metni_hic_alinmamis", "OCR_GEREKLI": "ocr_yapilamamis"}
+
+
+# Kayıtların durumu: metni hiç alınmamış, hata, sitede yok, OCR yapılamamış.
+def _kayitlari_denetle(r: Rapor, kayitlar: dict[str, ArsivMevzuat]) -> None:
+    r.sayilar.update(mevzuat=len(kayitlar), durum=dict(Counter(m.durum for m in kayitlar.values())),
+                     tur=dict(Counter(m.tur for m in kayitlar.values())),
+                     kalkti=sum(1 for m in kayitlar.values() if m.kalkti))
     for m in kayitlar.values():
         if m.kalkti:
             continue
-        if m.durum == "BEKLIYOR":
-            ekle(z, "metni_hic_alinmamis", m.anahtar)
+        if m.durum in _DURUM_BULGUSU:
+            r.hata(_DURUM_BULGUSU[m.durum], m.anahtar)
         elif m.durum == "HATA":
-            ekle(z, "hata", {"anahtar": m.anahtar, "hata": (m.son_hata or "")[:200]})
+            r.hata("hata", {"anahtar": m.anahtar, "hata": (m.son_hata or "")[:200]})
         elif m.durum in ("SITEDE_YOK", "BOS"):
-            ekle(g, "sitede_yok", {"anahtar": m.anahtar, "ad": m.ad[:100], "neden": m.son_hata})
-        elif m.durum == "OCR_GEREKLI":
-            ekle(z, "ocr_yapilamamis", m.anahtar)
+            r.bak("sitede_yok", {"anahtar": m.anahtar, "ad": m.ad[:100], "neden": m.son_hata})
 
-    # Sürümler: tutarlılık, son sürüm kalitesi.
+
+# Sürüm numaraları 1, 2, 3 ... diye kesintisiz ve kaydın sürüm sayısıyla aynı mı.
+def _surumleri_denetle(r: Rapor, session: Session, kayitlar: dict[str, ArsivMevzuat]) -> None:
     numaralar: dict[str, list[int]] = {}
     for anahtar, no in session.execute(select(ArsivSurumu.anahtar, ArsivSurumu.surum_no)):
         numaralar.setdefault(anahtar, []).append(no)
     for anahtar, liste in numaralar.items():
         m = kayitlar.get(anahtar)
         if m is None:
-            ekle(z, "kaydi_olmayan_surum", anahtar)
+            r.hata("kaydi_olmayan_surum", anahtar)
         elif sorted(liste) != list(range(1, len(liste) + 1)) or m.surum_sayisi != max(liste):
-            ekle(z, "surum_numarasi_tutarsiz", anahtar)
+            r.hata("surum_numarasi_tutarsiz", anahtar)
     for m in kayitlar.values():
         if m.durum == "TAMAM" and m.anahtar not in numaralar:
-            ekle(z, "tamam_ama_surumsuz", m.anahtar)
-    s["surum"] = sum(len(v) for v in numaralar.values())
-    s["birden_cok_surumlu"] = sum(1 for v in numaralar.values() if len(v) > 1)
-    s["surum_turu"] = dict(session.execute(select(ArsivSurumu.surum_turu, func.count()).group_by(ArsivSurumu.surum_turu)).all())
+            r.hata("tamam_ama_surumsuz", m.anahtar)
+    r.sayilar.update(
+        surum=sum(len(v) for v in numaralar.values()),
+        birden_cok_surumlu=sum(1 for v in numaralar.values() if len(v) > 1),
+        surum_turu=dict(session.execute(select(ArsivSurumu.surum_turu, func.count())
+                                        .group_by(ArsivSurumu.surum_turu)).all()))
 
-    son_q = (select(ArsivSurumu).join(ArsivMevzuat, ArsivMevzuat.anahtar == ArsivSurumu.anahtar)
-             .where(ArsivSurumu.surum_no == ArsivMevzuat.surum_sayisi, ArsivMevzuat.kalkti.is_(None))
-             .execution_options(yield_per=200))
-    okuma, kalite, sayfa_yontem, ek_durum, ek_okuma = Counter(), Counter(), Counter(), Counter(), Counter()
-    dosya_yollari: set[str] = set()
-    for v in session.scalars(son_q):
+
+# Metinde kalmaması gereken okuma kusurları (zorunlu ölçüt adı, koşul).
+_METIN_KUSURLARI = (
+    ("cid_kalintisi", lambda t: "(cid:" in t),
+    ("yedek_karakter", lambda t: "�" in t),
+    ("ocr_siniri_notu", lambda t: "taranmış sayfayla sınırlandı" in t),
+    ("kontrol_karakteri", lambda t: _KONTROL_KARAKTERI.search(t) is not None),
+    ("nfc_disi", lambda t: unicodedata.normalize("NFC", t) != t),
+)
+
+
+def _metni_denetle(r: Rapor, v: ArsivSurumu) -> None:
+    t = v.metin
+    if v.okuyucu_surumu < arsiv_cekim.OKUYUCU_SURUMU:
+        r.hata("eski_okuyucuyla_okunmus", v.anahtar)
+    for ad, kosul in _METIN_KUSURLARI:
+        if kosul(t):
+            r.hata(ad, v.anahtar)
+    if v.kalite == "kusurlu":
+        r.bak("kusurlu", {"anahtar": v.anahtar, "notlar": (v.kalite_notlari or [])[:5]})
+    if v.okuma in ("pdf_metin", "ocr", "karisik") and _cumle_ortasi_orani(t) > 0.3:
+        r.bak("cumle_ortasi_kirik", v.anahtar)
+    if len(_KOPMA.findall(md.kucuk(t))) >= 20:
+        r.bak("kelime_ici_kopma", v.anahtar)
+
+
+# Sürümün sayfa, PDF, ek ve resim dosyalarını rapora yazar; okunamamış sayfa ve inmeyen ek/resim bulgusu çıkarır.
+def _dosyalari_topla(r: Rapor, v: ArsivSurumu, sayfa_yontem: Counter, ek_durum: Counter) -> None:
+    for p in v.sayfalar or []:
+        sayfa_yontem[p.get("yontem")] += 1
+        if p.get("yontem") == "okunamadi":
+            r.hata("okunamamis_sayfa", {"anahtar": v.anahtar, "sayfa": p.get("no"), "uyari": p.get("uyari")})
+        r.dosya(p.get("goruntu"))
+    r.dosya(v.pdf_yolu)
+    r.dosya(v.site_pdf_yolu)
+    for e in v.ekler or []:
+        ek_durum[e.get("durum") or ("indi" if e.get("sha256") else "?")] += 1
+        r.dosya(e.get("yol"))
+        if e.get("durum") not in ("indi", None):
+            r.bak("inmeyen_ek", {"anahtar": v.anahtar, "ad": e.get("ad"), "durum": e.get("durum"),
+                                 "denenen": [d.get("url") for d in e.get("denenen") or []][:4]})
+    for res in v.resimler or []:
+        r.dosya(res.get("yol"))
+        if not res.get("yol") and res.get("durum") != "indi":
+            r.bak("inmeyen_resim", {"anahtar": v.anahtar, "src": res.get("src")})
+
+
+# Yürürlükteki her mevzuatın son sürümü: metin kusurları, kalite, sayfalar, ekler, resimler.
+def _son_surumleri_denetle(r: Rapor, session: Session) -> None:
+    q = (select(ArsivSurumu).join(ArsivMevzuat, ArsivMevzuat.anahtar == ArsivSurumu.anahtar)
+         .where(ArsivSurumu.surum_no == ArsivMevzuat.surum_sayisi, ArsivMevzuat.kalkti.is_(None))
+         .execution_options(yield_per=200))
+    okuma, kalite, sayfa_yontem, ek_durum = Counter(), Counter(), Counter(), Counter()
+    for v in session.scalars(q):
         okuma[v.okuma] += 1
         kalite[v.kalite] += 1
-        t = v.metin
-        if v.okuyucu_surumu < arsiv_cekim.OKUYUCU_SURUMU:
-            ekle(z, "eski_okuyucuyla_okunmus", v.anahtar)
-        if "(cid:" in t:
-            ekle(z, "cid_kalintisi", v.anahtar)
-        if "�" in t:
-            ekle(z, "yedek_karakter", v.anahtar)
-        if "taranmış sayfayla sınırlandı" in t:
-            ekle(z, "ocr_siniri_notu", v.anahtar)
-        if _KONTROL_KARAKTERI.search(t):
-            ekle(z, "kontrol_karakteri", v.anahtar)
-        if unicodedata.normalize("NFC", t) != t:
-            ekle(z, "nfc_disi", v.anahtar)
-        if v.kalite == "kusurlu":
-            ekle(g, "kusurlu", {"anahtar": v.anahtar, "notlar": (v.kalite_notlari or [])[:5]})
-        for p in v.sayfalar or []:
-            sayfa_yontem[p.get("yontem")] += 1
-            if p.get("yontem") == "okunamadi":
-                ekle(z, "okunamamis_sayfa", {"anahtar": v.anahtar, "sayfa": p.get("no"), "uyari": p.get("uyari")})
-            if p.get("goruntu"):
-                dosya_yollari.add(p["goruntu"])
-        if v.okuma in ("pdf_metin", "ocr", "karisik") and _cumle_ortasi_orani(t) > 0.3:
-            ekle(g, "cumle_ortasi_kirik", v.anahtar)
-        if len(_KOPMA.findall(md.kucuk(t))) >= 20:
-            ekle(g, "kelime_ici_kopma", v.anahtar)
-        for yol in (v.pdf_yolu, v.site_pdf_yolu):
-            if yol:
-                dosya_yollari.add(yol)
-        for e in v.ekler or []:
-            ek_durum[e.get("durum") or ("indi" if e.get("sha256") else "?")] += 1
-            if e.get("yol"):
-                dosya_yollari.add(e["yol"])
-            if e.get("durum") not in ("indi", None):
-                ekle(g, "inmeyen_ek", {"anahtar": v.anahtar, "ad": e.get("ad"), "durum": e.get("durum"),
-                                       "denenen": [d.get("url") for d in e.get("denenen") or []][:4]})
-        for r in v.resimler or []:
-            if r.get("yol"):
-                dosya_yollari.add(r["yol"])
-            elif r.get("durum") != "indi":
-                ekle(g, "inmeyen_resim", {"anahtar": v.anahtar, "src": r.get("src")})
-    s["okuma"], s["kalite"], s["sayfa_yontemi"] = dict(okuma), dict(kalite), dict(sayfa_yontem)
-    s["ek_durumu"] = dict(ek_durum)
+        _metni_denetle(r, v)
+        _dosyalari_topla(r, v, sayfa_yontem, ek_durum)
+    r.sayilar.update(okuma=dict(okuma), kalite=dict(kalite), sayfa_yontemi=dict(sayfa_yontem), ek_durumu=dict(ek_durum))
 
-    # Dosya kayıtları.
+
+# İşlenmiş dosyalar (ek, arşivden çıkan, resim) ve diskteki dosyalar: görünümsüz, eksik, sahipsiz, SHA (istenirse).
+def _dosyalari_denetle(r: Rapor, session: Session, klasor: Path, sha_dogrula: bool) -> None:
+    okunus = Counter()
     for d in session.scalars(select(ArsivDosyasi).execution_options(yield_per=500)):
-        dosya_yollari.add(d.yol)
-        ek_okuma[(d.bicim, d.durum)] += 1
+        r.dosya(d.yol)
+        okunus[(d.bicim, d.durum)] += 1
         if d.durum != "tamam":
-            ekle(g, "gorunumu_olmayan_dosya", {"sha256": d.sha256[:16], "ad": d.ad, "bicim": d.bicim, "notlar": d.notlar[:2]})
-        if sha_dogrula:
-            yol = klasor / d.yol
-            if yol.is_file() and hashlib.sha256(yol.read_bytes()).hexdigest() != d.sha256:
-                ekle(z, "sha_tutmayan_dosya", d.yol)
-    s["dosya_okuma"] = {f"{b}/{d}": n for (b, d), n in ek_okuma.items()}
-
-    # Diskteki dosyalar.
-    eksik = [y for y in dosya_yollari if not (klasor / y).is_file()]
-    for y in eksik:
-        ekle(z, "eksik_dosya", y)
+            r.bak("gorunumu_olmayan_dosya", {"sha256": d.sha256[:16], "ad": d.ad, "bicim": d.bicim, "notlar": d.notlar[:2]})
+        yol = klasor / d.yol
+        if sha_dogrula and yol.is_file() and hashlib.sha256(yol.read_bytes()).hexdigest() != d.sha256:
+            r.hata("sha_tutmayan_dosya", d.yol)
+    r.sayilar["dosya_okuma"] = {f"{b}/{d}": n for (b, d), n in okunus.items()}
+    for y in r.dosya_yollari:
+        if not (klasor / y).is_file():
+            r.hata("eksik_dosya", y)
     disk = {p.relative_to(klasor).as_posix() for alt in ("pdf", "ekler", "resim", "goruntu") if (klasor / alt).exists()
             for p in (klasor / alt).rglob("*") if p.is_file() and not p.name.endswith(".yaziliyor")}
-    s["diskte_dosya"] = len(disk)
-    s["sahipsiz_dosya"] = len(disk - dosya_yollari)
+    r.sayilar.update(diskte_dosya=len(disk), sahipsiz_dosya=len(disk - r.dosya_yollari))
 
-    # Muhtemel mükerrer: aynı ad, aynı RG tarihi ve sayısı.
+
+# Muhtemel mükerrer: aynı ad, aynı RG tarihi ve sayısı.
+def _mukerrerleri_denetle(r: Rapor, kayitlar: dict[str, ArsivMevzuat]) -> None:
     gruplar: dict[tuple, list[str]] = {}
     for m in kayitlar.values():
         if m.rg_tarihi and m.rg_sayisi:
             gruplar.setdefault((m.ad.strip().upper(), m.rg_tarihi, m.rg_sayisi), []).append(m.anahtar)
     for (ad, tarih, sayi), anahtarlar in gruplar.items():
         if len(anahtarlar) > 1:
-            ekle(g, "muhtemel_mukerrer", {"anahtarlar": anahtarlar, "ad": ad[:100], "rg": f"{tarih}/{sayi}"})
+            r.bak("muhtemel_mukerrer", {"anahtarlar": anahtarlar, "ad": ad[:100], "rg": f"{tarih}/{sayi}"})
 
-    sonuc["sayac"] = {"zorunlu": {k: len(v) for k, v in z.items()}, "gozden_gecir": {k: len(v) for k, v in g.items()}}
-    sonuc["hatasiz"] = not any(z.values())
-    return sonuc
+
+def kontrol(session: Session, klasor: Path, sha_dogrula: bool = False) -> dict:
+    r = Rapor()
+    kayitlar = {m.anahtar: m for m in session.scalars(select(ArsivMevzuat))}
+    _kayitlari_denetle(r, kayitlar)
+    _surumleri_denetle(r, session, kayitlar)
+    _son_surumleri_denetle(r, session)
+    _dosyalari_denetle(r, session, klasor, sha_dogrula)
+    _mukerrerleri_denetle(r, kayitlar)
+    return r.sozluk()
 
 
 def rapor_metni(r: dict) -> str:

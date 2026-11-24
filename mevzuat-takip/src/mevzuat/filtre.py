@@ -2,7 +2,10 @@
 import re
 import tomllib
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
+
+from mevzuat import turkce_ek
 
 # "Harf sayılan karakterler". Kelimenin başında/sonunda başka harf var mı diye bakarken kullanılıyor.
 HARF = "a-z0-9çğıöşü"
@@ -103,7 +106,8 @@ def konulari_yukle(yol: Path) -> list[Konu]:
 def _maskele(metin: str, ifadeler: tuple[str, ...]) -> str:
     for ifade in ifadeler:
         # İfadenin önünde ve arkasında başka harf olmayan (tam kelime) geçişleri sil. re.escape, nokta gibi özel karakterleri düz harf say.
-        metin = re.sub(rf"(?<![{HARF}]){re.escape(ifade)}(?![{HARF}])", " ", metin)
+        # Aynı uzunlukta boşlukla: metindeki yerler (kanıt parçaları) kaymasın.
+        metin = re.sub(rf"(?<![{HARF}]){re.escape(ifade)}(?![{HARF}])", lambda m: " " * len(m.group(0)), metin)
     return metin
 
 
@@ -111,21 +115,35 @@ def _maskele(metin: str, ifadeler: tuple[str, ...]) -> str:
 TUM_DUYURULAR = "(kaynağın tüm duyuruları)"
 
 
+# Bütün konulara ortak deyimler (veri/deyimler.txt): "kayıt altına alınması", "altın madalya" gibi.
+@cache
+def deyimler() -> tuple[re.Pattern, ...]:
+    yol = Path(__file__).parent / "veri" / "deyimler.txt"
+    satirlar = [s.strip() for s in yol.read_text(encoding="utf-8").splitlines()]
+    return tuple(re.compile(s) for s in satirlar if s and not s.startswith("#"))
+
+
+# Metni eşleştirmeye hazırlar: Türkçe küçük harf, ortak deyimler ve konunun hariç ifadeleri maskelenir.
+def hazirla(metin: str, konu: Konu | None = None) -> str:
+    normal = tr_kucuk(metin)
+    for d in deyimler():
+        normal = d.sub(lambda m: " " * len(m.group(0)), normal)
+    return _maskele(normal, konu.haric) if konu else normal
+
+
 # Asıl eşleştirme burada. Metnin hangi konulara uyduğunu ve her konuda hangi kelimelerin geçtiğini bulur, örneğin Vergi konusunda ötv.
 def eslesmeler(metin: str, konular: list[Konu]) -> dict[str, list[str]]:
-    """Her konu adı için metinde geçen anahtar kelimeleri döner. Eşleşme yoksa boş sözlük döner."""
-    # Metni Türkçe küçük harfe çevir.
-    normal = tr_kucuk(metin)
+    """Her konu adı için metinde geçen anahtar kelimeleri döner. Eşleşme yoksa boş sözlük döner.
+    Kelimeden sonra sadece Türkçe ek gelebilir (turkce_ek: "altın" → "altının" evet, "altınbaş" hayır); kelime "*" ile
+    bitiyorsa başı tutması yeter. Ortak deyimler ve konunun hariç ifadeleri önce maskelenir. Dışlanan ifade geçerse
+    (başlık düzeyinde, günlük taramada) konu eşleşmez; arşiv puanlamasında ise dışlanan ifade ceza puanıdır (puan.py)."""
     sonuc = {}
     for konu in konular:
+        aranan = hazirla(metin, konu)
         # Dışlanan bir ifade geçiyorsa bu konuyu atla.
-        if any(d in normal for d in konu.dislanan):
+        if any(d in aranan for d in konu.dislanan):
             continue
-        # Hariç ifadeleri metinden çıkar.
-        aranan = _maskele(normal, konu.haric)
-        # Kelimenin önünde başka harf olmayan geçişleri ara. Sonu serbest, "vergi" kelimesi "vergisi"ni de yakalar.
-        bulunan = [k for k in konu.kelimeler if re.search(rf"(?<![{HARF}]){re.escape(k)}", aranan)]
-        # En az bir kelime bulunduysa konu eşleşti.
+        bulunan = [k for k in konu.kelimeler if turkce_ek.var_mi(k, aranan)]
         if bulunan:
             sonuc[konu.ad] = bulunan
     return sonuc

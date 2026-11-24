@@ -427,6 +427,47 @@ def arsiv_kontrol_komutu(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+# "arsiv-dizin" komutu, arama dizinini baştan kurar (arama.py).
+def arsiv_dizin_komutu(args: argparse.Namespace) -> None:
+    from mevzuat import arama
+
+    engine = make_engine()
+    migrate(engine)
+    with Session(engine) as session:
+        n = arama.dizini_kur(session, ilerle=lambda i, t: print(f"dizin: {i}/{t}", flush=True))
+    print(f"Arama dizini kuruldu: {n} satır.")
+
+
+# "arsiv-filtre" komutu, konu filtresini arşivin tamamına uygular (arama.py, puan.py).
+def arsiv_filtre_komutu(args: argparse.Namespace) -> None:
+    from mevzuat import arama
+    from mevzuat.tanimlar import konulari_oku
+
+    engine = make_engine()
+    migrate(engine)
+    with Session(engine) as session:
+        if args.dizin_eksikse and arama.dizin_eksik_mi(session):
+            n = arama.dizini_kur(session, ilerle=lambda i, t: print(f"dizin: {i}/{t}", flush=True))
+            print(f"Arama dizini kuruldu: {n} satır.")
+        konular = konulari_oku(session)
+        if args.gerekirse and arama.filtre_guncel_mi(session, konular):
+            print("Konu filtresi güncel.")
+            return
+        sayac = arama.tum_arsivi_filtrele(session, konular, ilerle=lambda i, t: print(f"filtre: {i}/{t}", flush=True))
+    print("İlgili mevzuat sayıları:", sayac)
+
+
+# "filtre-olc" komutu, konu filtresinin test setiyle ölçümü (filtre_olcum.py).
+def filtre_olc_komutu(args: argparse.Namespace) -> None:
+    from mevzuat import filtre_olcum
+    from mevzuat.tanimlar import konulari_oku
+
+    engine = make_engine()
+    migrate(engine)
+    with Session(engine) as session:
+        print(filtre_olcum.rapor_metni(filtre_olcum.olc(session, konulari_oku(session))))
+
+
 # "arsiv-katla" komutu, teslim tabanı: her mevzuat tek sürüm (karar 19). --onay olmadan çalışmaz.
 def arsiv_katla_komutu(args: argparse.Namespace) -> None:
     from mevzuat import arsiv_kontrol
@@ -665,6 +706,13 @@ def main() -> None:
     akn = alt.add_parser("arsiv-kontrol", help="Arşivin teslim kontrolü (sadece okur), rapor arsiv/kontrol/ altına yazılır")
     akn.add_argument("--sha", action="store_true", help="Her dosyanın SHA-256 özetini de doğrula (bütün dosyaları okur, uzun sürer)")
     akn.set_defaults(func=arsiv_kontrol_komutu)
+    adz = alt.add_parser("arsiv-dizin", help="Arşivin tam metin arama dizinini baştan kurar")
+    adz.set_defaults(func=arsiv_dizin_komutu)
+    afl = alt.add_parser("arsiv-filtre", help="Konu filtresini arşivin tamamına uygular (konular değişince zamanlayıcı başlatır)")
+    afl.add_argument("--dizin-eksikse", action="store_true", help="Arama dizini eksikse önce onu da kurar")
+    afl.add_argument("--gerekirse", action="store_true", help="Konular son hesaplamadan beri değişmediyse hiçbir şey yapmaz")
+    afl.set_defaults(func=arsiv_filtre_komutu)
+    alt.add_parser("filtre-olc", help="Konu filtresini test setiyle ölçer (eski başlık filtresi ve yeni puan, eşik eşik)")         .set_defaults(func=filtre_olc_komutu)
     akt = alt.add_parser("arsiv-katla", help="Her mevzuatın son sürümü v1 olur, öncekiler silinir (teslim tabanı, karar 19)")
     akt.add_argument("--onay", action="store_true", help="Geri alınamaz; önce veritabanı yedeği alın")
     akt.set_defaults(func=arsiv_katla_komutu)

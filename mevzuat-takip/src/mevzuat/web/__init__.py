@@ -23,6 +23,7 @@ import html
 import json
 import logging
 import os
+import re
 import secrets
 import time
 from collections.abc import Callable
@@ -100,6 +101,10 @@ PANEL_ON_EK = "/panel/api"
 DOKUMAN_ADRESLERI = ("/api/dokuman", "/api/dokuman/openapi.json", "/api/dokuman/indir")
 # Tarayıcıda yeni sekmede açılabilen adresler, doküman sayfası ve indirilen doküman. Diğer API adresleri açılmaz.
 TARAYICIDA_ACILANLAR = ("/api/dokuman", "/api/dokuman/indir")
+# Arşiv dosyaları da tarayıcıda açılır: "Orijinal" sekmesindeki çerçeve (iframe), "İndir" bağlantıları ve yeni sekmede
+# açılan resim tarayıcının kendi isteğidir (sec-fetch-mode: navigate). Sadece okuma, oturum çerezi gerekir ve çerez
+# same_site=strict olduğundan başka siteden gelen açılışta gönderilmez.
+TARAYICIDA_ACILAN_ARSIV = re.compile(r"/panel/api/arsiv/(dosya/[^/]+|mevzuat/[^/]+/pdf|goruntu)")
 # Dış sistemlerin API anahtarını gönderdiği başlık.
 API_BASLIGI = "X-API-Anahtari"  # eski biçim, hâlâ kabul edilir ama dokümanda sadece "Authorization: Bearer" var
 # Aynı anahtarın son kullanım zamanı en fazla dakikada bir yazılır.
@@ -429,7 +434,8 @@ def uygulama_olustur(
         Başka bir site kullanıcının tarayıcısından istek gönderse bile bu başlığı koyamaz."""
         # Adres tarayıcıda yeni sekmede açılırsa (adres çubuğu, link) reddedilir, giriş yapmış olsa da.
         # Panel ve dış sistemler adresleri sayfanın içinden çağırır, doküman sayfası ve indirme bunun dışında.
-        if request.headers.get("sec-fetch-mode") == "navigate" and request.url.path not in TARAYICIDA_ACILANLAR:
+        if (request.headers.get("sec-fetch-mode") == "navigate" and request.url.path not in TARAYICIDA_ACILANLAR
+                and not TARAYICIDA_ACILAN_ARSIV.fullmatch(request.url.path)):
             raise HTTPException(401, "Bu adres tarayıcıda doğrudan açılamaz.")
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return
@@ -1197,10 +1203,35 @@ def uygulama_olustur(
 
     # Arşiv listesi, arama ve süzme ile.
     @api.get("/arsiv/liste")
-    def arsiv_listesi(request: Request, ara: str = "", tur: str = "", durum: str = "", sayfa: int = 1):
+    def arsiv_listesi(request: Request, ara: str = "", tur: str = "", durum: str = "", sayfa: int = 1, konu: str = ""):
         with Oturum() as db:
             giris_gerekli(request, db)
-            return arsiv.liste(db, ara[:200], tur, durum, sayfa)
+            return arsiv.liste(db, ara[:200], tur, durum, sayfa, konu=konu[:200])
+
+    # Arşivde tam metin araması: kelime ya da "ifade", hangi mevzuatın hangi maddesinde, vurgulu parçayla (Faz 2).
+    @api.get("/arsiv/ara")
+    def arsiv_ara(request: Request, q: str = "", tur: str = "", konu: str = "", sayfa: int = 1):
+        from mevzuat import arama
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            return arama.ara(db, q[:300], tur, konu[:200], sayfa)
+
+    # Konu filtresinin arşivdeki durumu: konu başına ilgili mevzuat sayısı, son hesaplama (Faz 3).
+    @api.get("/arsiv/konular")
+    def arsiv_konulari(request: Request):
+        from mevzuat import arama
+        from mevzuat.db import ArsivKonu, SistemAyari
+        from mevzuat.tanimlar import konulari_oku
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            sayilar = dict(db.execute(select(ArsivKonu.konu, func.count()).where(ArsivKonu.ilgili.is_(True))
+                                      .group_by(ArsivKonu.konu)).all())
+            konular = konulari_oku(db)
+            ayar = db.get(SistemAyari, arama.IMZA_ANAHTARI)
+            return {"konular": [{"ad": k.ad, "ilgili": sayilar.get(k.ad, 0)} for k in konular],
+                    "toplam_ilgili": db.scalar(select(func.count(func.distinct(ArsivKonu.anahtar)))
+                                               .where(ArsivKonu.ilgili.is_(True))) or 0,
+                    "guncel": arama.filtre_guncel_mi(db, konular), "hesaplandi": (ayar.deger or {}).get("hesaplandi") if ayar else None}
 
     # Bir mevzuatın künyesi ve sürümleri.
     @api.get("/arsiv/mevzuat/{anahtar}")

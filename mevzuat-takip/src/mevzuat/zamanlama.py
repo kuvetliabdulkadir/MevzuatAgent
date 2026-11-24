@@ -307,6 +307,15 @@ def arsiv_baslat(istek_id: int) -> subprocess.Popen:
     return subprocess.Popen([sys.executable, "-m", "mevzuat.cli", "arsiv-kur", "--istek", str(istek_id)])
 
 
+# Konu filtresini (ve eksikse arama dizinini) arşivin tamamına uygulayan süreç ("python -m mevzuat.cli arsiv-filtre").
+def filtre_baslat() -> subprocess.Popen:
+    return subprocess.Popen([sys.executable, "-m", "mevzuat.cli", "arsiv-filtre", "--gerekirse", "--dizin-eksikse"])
+
+
+# Konular değişti mi / dizin eksik mi kontrolü bu aralıkla yapılır.
+FILTRE_KONTROL_ARALIGI = timedelta(minutes=5)
+
+
 # Zamanlayıcının kendisi.
 class Zamanlayici:
     """Test edilebilsin diye saat, rastgelelik ve süreç başlatma dışarıdan verilebilir. `adim` tek bir uyanışı çalıştırır."""
@@ -322,9 +331,14 @@ class Zamanlayici:
         gecikme: Callable[[], float] = lambda: random.uniform(0, EN_FAZLA_GECIKME),
         # Arşiv işini başlatan fonksiyon (testte sahte olabilir).
         arsiv_baslat: Callable[[int], subprocess.Popen] = arsiv_baslat,
+        # Konu filtresini arşive uygulayan süreci başlatan fonksiyon (testte sahte olabilir).
+        filtre_baslat: Callable[[], subprocess.Popen] = filtre_baslat,
     ):
         self.engine, self.baslat, self.saat, self.gecikme = engine, baslat, saat, gecikme
         self.arsiv_baslat = arsiv_baslat
+        self.filtre_baslat = filtre_baslat
+        self.filtre_surec: subprocess.Popen | None = None
+        self.filtre_kontrol: datetime | None = None
         # Şu an çalışan arşiv süreci ve isteği (yoksa None).
         self.arsiv_surec: subprocess.Popen | None = None
         self.arsiv_istek_id: int | None = None
@@ -412,6 +426,8 @@ class Zamanlayici:
             # Arşiv işi sürmüyorsa bekleyen arşiv isteği var mı bak.
             if self.arsiv_surec is None:
                 self._arsiv_istegini_al(session, simdi)
+            # Konular değiştiyse ya da arama dizini eksikse arşiv yeniden filtrelenir (arşiv işi sürmüyorken).
+            self._filtreyi_denetle(session, simdi)
             # Son olarak nabız yaz.
             nabiz_yaz(session, simdi, "tarama" if self.surec is not None else "bekliyor", self.hedef, self.saatler)
 
@@ -439,6 +455,30 @@ class Zamanlayici:
                        hata=f"Tarama süreci başlatılamadı: {e!r}"[:2000])
             return
         self.istek_id = istek.id
+
+    def _filtreyi_denetle(self, session: Session, simdi: datetime) -> None:
+        if self.filtre_surec is not None:
+            if self.filtre_surec.poll() is None:
+                return
+            log.info("Arşiv konu filtresi bitti (çıkış kodu %d)", self.filtre_surec.returncode)
+            self.filtre_surec = None
+        if self.arsiv_surec is not None:
+            return
+        if self.filtre_kontrol is not None and simdi - self.filtre_kontrol < FILTRE_KONTROL_ARALIGI:
+            return
+        self.filtre_kontrol = simdi
+        try:
+            from mevzuat import arama
+            from mevzuat.db import ArsivMevzuat
+            from mevzuat.tanimlar import konulari_oku
+            if not session.scalar(select(func.count()).select_from(ArsivMevzuat).where(ArsivMevzuat.surum_sayisi > 0)):
+                return
+            if arama.filtre_guncel_mi(session, konulari_oku(session)) and not arama.dizin_eksik_mi(session):
+                return
+            log.info("Konular değişti ya da arama dizini eksik: arşiv yeniden filtreleniyor")
+            self.filtre_surec = self.filtre_baslat()
+        except Exception:
+            log.exception("Arşiv konu filtresi denetlenemedi")
 
     # Bekleyen arşiv isteğini alıp arşiv sürecini başlatır ("Şimdi tara" ile aynı yol).
     def _arsiv_istegini_al(self, session: Session, simdi: datetime) -> None:

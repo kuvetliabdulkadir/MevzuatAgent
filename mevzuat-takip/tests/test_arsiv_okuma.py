@@ -5,7 +5,6 @@ import io
 import json
 import zipfile
 from datetime import datetime
-from pathlib import Path
 
 import httpx
 import pytest
@@ -13,15 +12,23 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
+from test_arsiv import METINLI_PDF, TARANMIS_PDF
 
-from mevzuat import (arsiv, arsiv_cekim, arsiv_fark, arsiv_kontrol, ek_okuma, html_okuma, metin_duzen as md, ocr,
-                     pdf_okuma)
+from mevzuat import (
+    arsiv,
+    arsiv_cekim,
+    arsiv_fark,
+    arsiv_kontrol,
+    ek_okuma,
+    html_okuma,
+    ocr,
+    pdf_okuma,
+)
+from mevzuat import metin_duzen as md
 from mevzuat.db import ArsivDosyasi, ArsivMevzuat, ArsivSurumu, init_db
 from mevzuat.http import make_client
 from mevzuat.web import uygulama_olustur
 from mevzuat.web.guvenlik import kullanici_ekle
-
-from test_arsiv import METINLI_PDF, TARANMIS_PDF
 
 PAROLA = "dogru-parola-123"
 SITE = "https://www.mevzuat.gov.tr/"
@@ -453,6 +460,14 @@ def test_panel_gorunum_fark_dosya_ve_guvenlik(engine, tmp_path, monkeypatch):
     detay = c.get("/panel/api/arsiv/mevzuat/9.5.7").json()
     assert detay["surumler"][1]["ekler"][0]["gorunum_var"] and detay["surumler"][0]["surum_turu"] == "degisiklik"
     assert c.get("/panel/api/arsiv/mevzuat/9.5.7/pdf").status_code == 404
+    # Tarayıcının kendi açtığı istekler (iframe, "İndir" bağlantısı, yeni sekme) arşiv dosyalarında reddedilmez,
+    # JSON adreslerinde reddedilir.
+    gezinme = {"sec-fetch-mode": "navigate"}
+    assert c.get(f"/panel/api/arsiv/dosya/{ozet}", params={"indir": 1}, headers=gezinme).content == ek
+    assert c.get("/panel/api/arsiv/goruntu", params={"yol": "goruntu/abc/s1.png"}, headers=gezinme).status_code == 200
+    assert c.get("/panel/api/arsiv/mevzuat/9.5.7/pdf", headers=gezinme).status_code == 404  # 401 değil, PDF yok
+    assert c.get(f"/panel/api/arsiv/dosya/{ozet}/gorunum", headers=gezinme).status_code == 401
+    assert c.get("/panel/api/arsiv/mevzuat/9.5.7", headers=gezinme).status_code == 401
 
 
 def test_mulga_listesi_eksik_gelirse_farkli_sayfa_boyuyla_tamamlanir():

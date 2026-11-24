@@ -1,4 +1,9 @@
-"""Bir tarama çalışması. Önce güncellik kontrolü yapılır, sonra liste okunur, filtreden geçer, en son sadece ilgililerin içeriği indirilir.
+"""Bir tarama çalışması. Önce güncellik kontrolü yapılır, sonra liste okunur, en son her yeni kaydın içeriği indirilir ve
+konu kararı içerikle verilir (arşivle aynı puan, puan.py).
+
+Başlığa göre ilk karar kayıt eklenirken verilir (kaçırmak pahalı: başlıkta kelime geçen kayıt içerik ne derse desin ilgili
+kalır). İçerik gelince bütün konular puanlanır, eşiği geçen konular eklenir. İçerik alınamazsa başlık kararı geçerlidir.
+Rapor içerik adımı bitmemiş (BEKLIYOR) kaydı almaz, yani karar içerik gelmeden kesinleşmez.
 
 Pipeline kaynakları tanımaz. config/kaynaklar.toml dosyasından gelen her kaynağın `tara` ve `icerik`
 metotlarını çağırır. Her kaynak kendi checkpoint'inden devam eder. Checkpoint ancak bir tarama
@@ -11,13 +16,13 @@ Kayıtlar kaynak ve dis_id ile tekil olduğu için aynı şeyi iki kez işlemek 
 import logging
 import re
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mevzuat import ocr, surum
+from mevzuat import arama, ocr, puan, surum
 from mevzuat.db import Calisma, KaynakDurumu, Kayit
 from mevzuat.filtre import TUM_DUYURULAR, Konu, eslesmeler, is_kollari, tr_kucuk
 from mevzuat.sources.base import Kaynak, KayitTaslagi
@@ -147,8 +152,9 @@ def _ekle(session: Session, kaynak: Kaynak, t: KayitTaslagi, konular: list[Konu]
         return False
     # Başlığın hangi konulara uyduğunu bul.
     eslesen = baslik_eslesmeleri(kaynak, t.baslik, konular)
-    # Resmî Gazete kaynağının zaten yakaladığı belge ikinci kez rapora girmez, kayıt ilgisiz olarak tutulur.
-    if eslesen and getattr(kaynak, "resmi_gazete_tekrari", False) and _resmi_gazetede_var(session, t):
+    # Başka bir kaynağın zaten yakaladığı belge ikinci kez rapora girmez, kayıt ilgisiz olarak tutulur, içeriği indirilmez.
+    tekrar = _baska_kaynakta_var(session, kaynak.ad, t)
+    if tekrar:
         eslesen = {}
     # Yeni kaydı oluştur ve ekle.
     session.add(
@@ -163,12 +169,12 @@ def _ekle(session: Session, kaynak: Kaynak, t: KayitTaslagi, konular: list[Konu]
             mukerrer=t.mukerrer,
             url=t.url,
             kaynakca=t.kaynakca,
-            # En az bir konuya uyduysa ilgili.
+            # Başlık en az bir konuya uyduysa şimdilik ilgili, içerik gelince konular puanla genişler.
             ilgili=bool(eslesen),
             eslesmeler=eslesen,
             is_kollari=is_kollari(eslesen, konular),
-            # İlgiliyse içeriği indirilmeyi BEKLIYOR, değilse indirmeye GEREK yok.
-            icerik_durumu="BEKLIYOR" if eslesen else "GEREKSIZ",
+            # Her yeni kaydın içeriği indirilir, tekrar olanınki indirilmez.
+            icerik_durumu="GEREKSIZ" if tekrar else "BEKLIYOR",
             ilk_gorulme=datetime.now(),
             calisma_id=calisma.id,
         )
@@ -178,41 +184,58 @@ def _ekle(session: Session, kaynak: Kaynak, t: KayitTaslagi, konular: list[Konu]
     return True
 
 
-# Başlığı karşılaştırmak için sadece harf ve rakamları bırakır, küçük harfe çevirir.
+# Başlığı karşılaştırmak için sadece harf ve rakamları bırakır, küçük harfe çevirir. Numara etiketleri ("Tebliğ No:",
+# "Sıra No:", "Sayı:") ve duyuru kuyruğu ("Resmî Gazete'de yayımlandı") atılır, numaranın kendisi kalır.
+_NO_ETIKETI = re.compile(r"\b(?:tebliğ|sıra|seri|karar)?\s*(?:no|sayı|sayısı|numarası)\s*[:.]", re.IGNORECASE)
+_DUYURU_KUYRUGU = re.compile(r"\s*(?:(?:resmi|resmî) gazete[’'`]?de\s*)?yayımlan(?:dı|mıştır)\W*$")
+TEKRAR_GUN = 3
+TEKRAR_EN_KISA = 20  # bundan kısa sade başlık ("Duyuru") karşılaştırılmaz
+
+
 def _sade_baslik(baslik: str) -> str:
-    return re.sub(r"[^0-9a-zçğıöşü]", "", tr_kucuk(baslik))
+    kucuk = _DUYURU_KUYRUGU.sub("", tr_kucuk(baslik).strip())
+    return re.sub(r"[^0-9a-zçğıöşü]", "", _NO_ETIKETI.sub(" ", kucuk))
 
 
-# Aynı gün Resmî Gazete kaynağında aynı başlıklı kayıt var mı (mevzuat.gov.tr aynı belgeyi birkaç gün sonra ekliyor).
-def _resmi_gazetede_var(session: Session, t: KayitTaslagi) -> bool:
+# Aynı belge ±3 gün içinde başka bir kaynaktan gelmiş mi (mevzuat.gov.tr Resmî Gazete'deki belgeyi birkaç gün sonra
+# ekliyor, GİB "… Resmî Gazete'de yayımlandı" duyurusu yapıyor). Kaynaktan bağımsız, sadece başlık ve tarih.
+def _baska_kaynakta_var(session: Session, kaynak_adi: str, t: KayitTaslagi) -> bool:
     aranan = _sade_baslik(t.baslik)
-    sorgu = select(Kayit.baslik).where(Kayit.kaynak == "resmi_gazete", Kayit.yayin_tarihi == t.yayin_tarihi)
-    if t.sayi is not None:
-        sorgu = sorgu.where(Kayit.sayi == t.sayi)
-    # Başlıklar bazen sonda farklılaşıyor (karar sayısı yazımı gibi), ilk 80 harf yeterli.
-    return any(_sade_baslik(b)[:80] == aranan[:80] for b in session.scalars(sorgu))
+    if len(aranan) < TEKRAR_EN_KISA or t.yayin_tarihi is None:
+        return False
+    sorgu = select(Kayit.baslik).where(
+        Kayit.kaynak != kaynak_adi,
+        Kayit.yayin_tarihi.between(t.yayin_tarihi - timedelta(days=TEKRAR_GUN), t.yayin_tarihi + timedelta(days=TEKRAR_GUN)))
+    for b in session.scalars(sorgu):
+        sade = _sade_baslik(b)
+        # Başlıklar bazen sonda farklılaşıyor (karar sayısı yazımı gibi), ikisi de uzunsa ilk 80 harf yeterli.
+        if sade == aranan or (min(len(sade), len(aranan)) >= 80 and sade[:80] == aranan[:80]):
+            return True
+    return False
 
 
-# İçeriği henüz indirilmemiş ilgili kayıtların metnini indirir (her çalışmada en fazla 50 tane).
+# İçeriği henüz indirilmemiş kayıtların metnini indirir ve konuları içerikle puanlar (her çalışmada en fazla 100 tane).
 def _icerik_cek(
-    session: Session, client: httpx.Client, kaynaklar: dict[str, Kaynak], konular: list[Konu], limit: int = 50
+    session: Session, client: httpx.Client, kaynaklar: dict[str, Kaynak], konular: list[Konu], limit: int = 100
 ) -> dict:
-    """Sadece ilgili kayıtların içeriğini indirir. HATA alanlar bir sonraki çalışmada tekrar denenir.
+    """Bekleyen kayıtların içeriğini indirir. HATA alanlar bir sonraki çalışmada tekrar denenir.
 
-    İçerik okununca filtre içerik üzerinde de çalışır ve kaydın iş kolları genişletilir. Örneğin başlığı
-    "Bazı Mallara Uygulanan ÖTV" olan kararın içinde "benzin" geçerse kayda Oto kiralama da eklenir.
-    Başlığa göre ilgisiz bulunan kayıtların içeriği hiç indirilmez, bu adım sadece genişletir.
+    İçerik okununca bütün konular arşivle aynı puanla hesaplanır (puan.py), eşiği geçen konular kayda eklenir.
+    Örneğin başlığında konu kelimesi olmayan bir tebliğin amaç maddesi ve birçok maddesi altın ticaretini düzenliyorsa
+    Kuyum'a gider; metinde bir kez "altın" geçmesi ise yetmez. Başlığa göre ilgili olan kayıt ilgili kalır.
     """
     # Hangi durumdaki kayıtlar indirilecek, bekleyenler ve geçen sefer hata alanlar.
     durumlar = ["BEKLIYOR", "HATA"]
     if ocr.ocr_kullanilabilir():
         durumlar.append("OCR_GEREKLI")  # OCR sonradan kurulduysa eski kayıtlar da okunur
-    # Bu durumlardaki, aktif kaynaklara ait en fazla 50 kaydı getir.
+    # Bu durumlardaki, aktif kaynaklara ait kayıtlar, başlığa göre ilgili olanlar önce (rapor onları bekliyor).
     bekleyenler = session.scalars(
         select(Kayit)
         .where(Kayit.icerik_durumu.in_(durumlar), Kayit.kaynak.in_(list(kaynaklar)))
+        .order_by(Kayit.ilgili.desc(), Kayit.id)
         .limit(limit)
     ).all()
+    agirlik = arama.kelime_agirliklari(session)
 
     # Sonuç sayaçları (özette görünür).
     sayac = {"TAMAM": 0, "OCR_ILE_OKUNDU": 0, "OCR_GEREKLI": 0, "HATA": 0}
@@ -228,8 +251,8 @@ def _icerik_cek(
                 kayit.icerik_durumu = "OCR_GEREKLI"
             else:
                 kayit.icerik_durumu = "TAMAM"
-            # Metinde başka konular da geçiyorsa iş kollarını genişlet.
-            _icerikten_genislet(kayit, konular)
+            # Konuları içerikle puanla, eşiği geçenleri ekle.
+            icerikle_puanla(kayit, konular, agirlik)
         except Exception:
             # İndirilemedi, HATA olarak işaretle, bir sonraki çalışmada tekrar denenir.
             log.exception("İçerik alınamadı: %s", kayit.kaynakca)
@@ -241,20 +264,35 @@ def _icerik_cek(
     return sayac
 
 
-# Belgenin metninde de filtreyi çalıştırır, bulunan yeni konuları/iş kollarını kayda ekler.
-def _icerikten_genislet(kayit: Kayit, konular: list[Konu]) -> None:
+def icerikle_eslesmeler(baslik: str, icerik: str, konular: list[Konu], onceki: dict[str, list[str]] | None = None,
+                        agirlik: dict[str, float] | None = None, ek: str = "(içerikte)",
+                        belge: puan.Belge | None = None) -> dict[str, list[str]]:
+    """Başlık eşleşmelerine (onceki) içerik puanıyla ilgili çıkan konuları ekler. Kelimeler kanıttan gelir ve `ek` ile
+    işaretlenir (raporda "neden size geldi" cümleleri bunlarla bulunur). Önceki konular hiç düşmez. Aynı metin birçok
+    kez puanlanacaksa hazırlanmış `belge` verilebilir."""
+    eslesen = {konu: list(kelimeler) for konu, kelimeler in (onceki or {}).items()}
+    if not icerik:
+        return eslesen
+    belge = belge or puan.belge_hazirla(baslik, icerik)
+    for konu in konular:
+        p = puan.puanla_hazir(belge, konu, agirlik=agirlik)
+        if not p.ilgili:
+            continue
+        mevcut = eslesen.setdefault(konu.ad, [])
+        # Zaten bulunmuş kelimeler (sonlarındaki ek olmadan).
+        gorulen = {m.removesuffix(f" {ek}") for m in mevcut}
+        for x in p.kanitlar:
+            if x.tur != "baslik" and x.kelime not in gorulen:
+                gorulen.add(x.kelime)
+                mevcut.append(f"{x.kelime} {ek}")
+    return eslesen
+
+
+# İçerik gelince konuları puanlar, kaydın eşleşmelerini, ilgili alanını ve iş kollarını günceller.
+def icerikle_puanla(kayit: Kayit, konular: list[Konu], agirlik: dict[str, float] | None = None) -> None:
     if not kayit.icerik:
         return
-    # Var olan eşleşmelerin kopyası.
-    eslesen = {konu: list(kelimeler) for konu, kelimeler in kayit.eslesmeler.items()}
-    # İçerikte bulunan her konu ve kelime için.
-    for konu, kelimeler in eslesmeler(kayit.icerik, konular).items():
-        mevcut = eslesen.setdefault(konu, [])
-        # Zaten bulunmuş kelimeler (sonlarındaki " (içerikte)" eki olmadan).
-        gorulen = {m.removesuffix(" (içerikte)") for m in mevcut}
-        # Yeni kelimeleri "(içerikte)" etiketiyle ekle (raporda "neden size geldi" kısmında görünür).
-        mevcut += [f"{k} (içerikte)" for k in kelimeler if k not in gorulen]
-    # JSON sütunlarında yerinde değişiklik SQLAlchemy'ce fark edilmez, yeni nesne atanmalı.
-    kayit.eslesmeler = eslesen
-    # İş kollarını yeni eşleşmelere göre yeniden hesapla.
-    kayit.is_kollari = is_kollari(eslesen, konular)
+    # JSON sütunlarında yerinde değişiklik SQLAlchemy'ce fark edilmez, yeni nesne atanıyor.
+    kayit.eslesmeler = icerikle_eslesmeler(kayit.baslik, kayit.icerik, konular, kayit.eslesmeler, agirlik)
+    kayit.ilgili = bool(kayit.eslesmeler)
+    kayit.is_kollari = is_kollari(kayit.eslesmeler, konular)

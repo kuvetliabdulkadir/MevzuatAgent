@@ -1,0 +1,13 @@
+# Bütün konulara ortak deyim listesi (plan, "Konu filtresi iyileştirmesi", madde 2). Konu kelimesine benzeyen ama başka
+# anlama gelen kalıplar. Her satır bir düzenli ifade, metnin Türkçe küçük harfli halinde aranır, bulunan yer konu
+# kelimeleri aranmadan önce maskelenir. "#" ile başlayan satır açıklamadır. Siteye ya da kaynağa özel kural yazılmaz.
+
+# "altına almak / altında" (under): kayıt altına alınması, kontrol altında tutulması ...
+\b(?:kayıt|kayit|kontrol|koruma|güvence|teminat|gözetim|denetim|idare|emniyet|vesayet|himaye|yükümlülük|tehdit|risk|baskı|etki|güvenlik|takip|izleme|sigorta|tedavi|karantina|yönetim|sorumluluk|nezaret|muhafaza)\s+altın(?:a|da|daki|dan)\b
+# Ödül ve unvan adlarındaki "altın"
+\baltın\s+(?:madalya|çekiç|portakal|koza|küre|kalem|yaka|oran|kural|kelebek|bilezik|anahtar|tabak|kupa|yıl|çağ|vuruş|fırsat|değerinde)\w*
+# "taşıt" kelimesini içeren ama araçla ilgisi olmayan kalıp yok; yeni deyimler buraya eklenir.
+# "altına almak, altına düşmek, altına girmek, altına yazmak ..." (hüküm altına alınmıştır, yaş altına satış). Sonra fiil
+# gelmeyen "altına dayalı borçlanma senedi" gibi gerçek altın anlamı maskelenmez.
+\baltın(?:a|da|dan)\s+(?:al|alın|düş|gir|yaz|koy|kon|çek|tut|sok|in|bulun|ol|kal|satış|satılam)\w*
+\b(?:yaş|sınır|seviye|eşik|limit|oran|değer|tutar|hüküm|imza|tehlike|tehdit)\w*\s+altın(?:a|da|dan)\b

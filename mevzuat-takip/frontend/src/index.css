@@ -251,3 +251,7 @@
 .arsiv-fark { font-family: Georgia, 'Times New Roman', serif; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; }
 .arsiv-fark ins { background: #d1fae5; color: #065f46; text-decoration: underline; text-decoration-color: #059669; }
 .arsiv-fark del { background: #ffe4e6; color: #9f1239; text-decoration: line-through; }
+
+/* Arşiv aramasında bulunan kelime. */
+.arsiv-arama-parcasi { color: #57534e; line-height: 1.5; }
+.arsiv-arama-parcasi mark { background: #fde68a; color: #1c1917; border-radius: 2px; padding: 0 1px; }

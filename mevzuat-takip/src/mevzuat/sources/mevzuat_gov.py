@@ -126,9 +126,6 @@ def mevzuatlar(client: httpx.Client, anahtar: str, tur: str, sonra: date, bugun:
 
 # mevzuat.gov.tr tipi kaynak.
 class MevzuatGovKaynagi:
-    # Resmî Gazete'de zaten yakalanan belge tekrar rapora girmesin (pipeline._ekle).
-    resmi_gazete_tekrari = True
-
     def __init__(self, ad: str, etiket: str = "Mevzuat Bilgi Sistemi", turler: list[str] = tuple(TURLER),
                  ortusme_gun: int = 5):
         bilinmeyen = set(turler) - set(TURLER)

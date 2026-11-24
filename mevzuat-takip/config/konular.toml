@@ -31,6 +31,7 @@ haric = [
     "altınkaya", "altındağ", "altınordu", "altınova", "altıntaş", "altınözü", "altınyayla",
     "altınekin", "altınoluk", "altınşehir", "gümüşhane", "gümüşhacıköy",
 ]
+dislanan = ["personeli görevde yükselme"]
 
 [[konu]]
 ad = "MASAK / suç gelirleri / yaptırımlar"
@@ -38,7 +39,8 @@ is_kollari = ["Ortak"]
 kelimeler = [
     "masak", "mali suçları araştırma", "suç gelirleri", "aklanması", "aklama",
     "terörün finansman", "kitle imha silahlarının yayılmasının finansman",
-    "malvarlığının dondurulması", "malvarlığı dondur", "yaptırım listesi",
+    "malvarlığının dondurulması", "malvarlığı dondur", "malvarlıklarının dondurulması",
+    "yaptırım listesi",
     "şüpheli işlem", "uyum görevlisi", "müşterini tanı", "kimlik tespit",
 ]
 
@@ -49,7 +51,7 @@ kelimeler = [
     "vergi usul", "katma değer vergisi", "kdv", "özel tüketim vergisi", "ötv",
     "gelir vergisi", "kurumlar vergisi", "damga vergisi", "harçlar kanunu",
     "yeniden değerleme", "e-fatura", "e-arşiv", "e-defter", "elektronik belge",
-    "gelir idaresi", "vergi kanun",
+    "gelir idaresi", "vergi kanun", "emlak vergisi", "motorlu taşıtlar vergisi", "vergi denetim",
 ]
 
 [[konu]]
@@ -66,7 +68,8 @@ ad = "Döviz ve kambiyo"
 is_kollari = ["Döviz/Altın"]
 kelimeler = [
     "türk parasının kıymetini koruma", "kambiyo", "döviz", "yetkili müessese",
-    "merkez bankası", "efektif",
+    # "merkez bankası" çıkarıldı (2026-11-24): TCMB personel, ihale, banknot düzenlemelerini getiriyordu.
+    "efektif",
 ]
 haric = ["döviz kazandırıcı"]
 # TCMB'nin kendi iç personel yönetmelikleri (90 günlük testte yakalandı)
@@ -76,9 +79,10 @@ dislanan = ["disiplin yönetmeliği", "performans değerlendirme yönetmeliği",
 ad = "Araç kiralama ve taşıtlar"
 is_kollari = ["Oto kiralama"]
 kelimeler = [
-    "araç kiralama", "kiralık araç", "rent a car", "motorlu taşıt", "taşıt", "otomobil",
+    "araç kiralama", "kiralık araç", "rent a car", "motorlu taşıt", "kara taşıt", "karayolu taşıt", "otomobil",
     "karayolları trafik", "karayolu trafik", "trafik sigorta", "zorunlu mali sorumluluk",
-    "kiralanması", "araç muayene", "plaka", "sürücü belgesi", "akaryakıt", "benzin", "motorin",
+    # "taşıt" ve "kiralanması" tek başına çıkarıldı (2026-11-24): deniz taşıtı, konut kiralanması geliyordu.
+    "araç kiralan", "araçların kiralan", "taşıt kiralan", "araç muayene", "plaka", "sürücü belgesi", "akaryakıt", "benzin", "motorin",
 ]
 
 [[konu]]
@@ -88,9 +92,12 @@ kelimeler = [
     "iş kanunu", "asgari ücret", "sosyal sigorta", "iş sağlığı ve güvenliği",
     "kıdem tazminat", "sosyal güvenlik", "çalışma izni",
 ]
-dislanan = ["üniversitesi", "uygulama ve araştırma merkezi", "personeli görevde yükselme"]
+# Meslek odalarının ücret tarifeleri (avukatlık, arabuluculuk, SMMM) asgari ücret değil.
+haric = ["asgari ücret tarifesi", "asgari ücret tarifesinde", "asgari ücret tarifesinin", "denetim ve asgari ücret"]
+dislanan = ["üniversitesi", "uygulama ve araştırma merkezi", "personeli görevde yükselme", "uzmanlığı yönetmeliği"]
 
 [[konu]]
 ad = "Kişisel veriler"
 is_kollari = ["Ortak"]
 kelimeler = ["kişisel veri"]
+dislanan = ["personeli görevde yükselme", "seçime dair karar"]

@@ -127,7 +127,7 @@ def test_ilk_calisma(session, kaynaklar, konular):
     assert any("Özel Tüketim Vergisi" in b for b in basliklar)
 
 
-def test_icerik_sadece_ilgililer_icin_indirilir(session, kaynaklar, konular):
+def test_her_yeni_kaydin_icerigi_indirilir_karar_icerikle_verilir(session, kaynaklar, konular):
     site = SahteSite({"2026-10-01": FIHRIST})
     with site.client() as c:
         pipeline.calistir(session, c, kaynaklar, konular, bugun=EKIM_1, simdi=SIMDI)
@@ -135,9 +135,10 @@ def test_icerik_sadece_ilgililer_icin_indirilir(session, kaynaklar, konular):
     ilgili = _sayi(session, ilgili=True)
     belge_istekleri = [u for u in site.istekler if "/eskiler/" in u or "/posts/" in u or "/findBySlug" in u]
     toplam = 18 + 10 + 1  # RG + MASAK + GİB
-    assert 0 < len(belge_istekleri) == ilgili < toplam
+    # Başlığı tutmayan kaydın içeriği de indirilir (konu kararı içerikle), ama hepsi ilgili olmaz.
+    assert len(belge_istekleri) == toplam and 0 < ilgili < toplam
     assert _sayi(session, icerik_durumu="BEKLIYOR") == 0
-    assert _sayi(session, ilgili=False, icerik_durumu="GEREKSIZ") == toplam - ilgili
+    assert _sayi(session, icerik_durumu="GEREKSIZ") == 0
     # Taranmış PDF'ler OCR_GEREKLI diye işaretlenir, sessizce "tamam" sayılmaz.
     assert _sayi(session, kaynak=RG, ilgili=True, icerik_durumu="TAMAM") == 0
 

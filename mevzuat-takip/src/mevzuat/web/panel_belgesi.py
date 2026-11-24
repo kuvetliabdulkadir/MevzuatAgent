@@ -212,7 +212,13 @@ BELGE: dict[tuple[str, str], tuple[str, str, str, dict]] = {
     ("POST", "/panel/api/arsiv/durdur"): ("Arşiv işini durdur", "Sıradaki iş hemen, çalışan iş sıradaki mevzuattan sonra durur.", AYAR,
                                     {**H401, **H403, 409: _hata("Durdurulacak iş yok", "Çalışan ya da sırada bekleyen arşiv işi yok.")}),
     ("GET", "/panel/api/arsiv/liste"): ("Arşiv listesi", "Arşivdeki mevzuat, `ara` (ad ya da anahtar), `tur`, `durum` (TAMAM, BEKLIYOR, "
-                                  "OCR_GEREKLI, SITEDE_YOK, HATA, KALKTI, KUSURLU) ve `sayfa` ile. Sayfa başına 50 kayıt.", HERKES, H401),
+                                  "OCR_GEREKLI, SITEDE_YOK, HATA, KALKTI, KUSURLU), `konu` (o konuyla ilgililer, * hepsi) ve `sayfa` ile. Sayfa başına 50 kayıt.", HERKES, H401),
+    ("GET", "/panel/api/arsiv/ara"): ("Arşivde arama", "`q` kelime ya da \"tırnak içinde ifade\" (sonuna * yazılırsa başı tutsun yeter): "
+                                "hangi mevzuatın hangi maddesinde geçtiği, vurgulu parçayla. Türkçe ek kuralı filtreyle ortak "
+                                "(\"altın\" altının'ı bulur, Altınbaş'ı bulmaz). `tur`, `konu` (sadece o konuyla ilgililer), `sayfa`.",
+                                HERKES, H401),
+    ("GET", "/panel/api/arsiv/konular"): ("Arşivin konu filtresi", "Konu başına ilgili mevzuat sayısı, son hesaplama zamanı ve "
+                                    "filtrenin güncel olup olmadığı (konular değişince zamanlayıcı yeniden hesaplar).", HERKES, H401),
     ("GET", "/panel/api/arsiv/mevzuat/{anahtar}"): ("Arşivdeki mevzuat", "Künye ve sürümler (v1, v2 ..., metinsiz): sürüm türü (ilk, "
                                               "degisiklik, okuma_duzeltmesi), kalite, okuma yöntemi, ekler (durumu, biçimi, içindekiler), "
                                               "sitenin PDF'i, yeni Resmî Gazete notları.", HERKES, {**H401, **H404}),

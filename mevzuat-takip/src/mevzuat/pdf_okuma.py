@@ -147,216 +147,259 @@ def _render(pdf: pypdfium2.PdfDocument, i: int, hedef: Path, dpi: int) -> None:
     gorsel.save(hedef, optimize=True)
 
 
+@dataclass
+class _Okunus:
+    """Bir PDF okunurken sayfa sayfa biriken sonuçlar ve görüntülerin yazılacağı yer."""
+    pdf_yolu: Path
+    kok: Path
+    goruntu_klasoru: str
+    metin: dict[int, str] = field(default_factory=dict)
+    gorunum: dict[int, list[str]] = field(default_factory=dict)
+    bilgi: dict[int, dict] = field(default_factory=dict)
+    arama: dict[int, str] = field(default_factory=dict)
+    kusurlar: list[str] = field(default_factory=list)
+
+    def goruntu_yolu(self, i: int, ek: str = "") -> str:
+        return f"{self.goruntu_klasoru}/s{i + 1}{ek}.png"
+
+    # Yazı ya da OCR ile okunmuş düz metin sayfası (sınıflı paragraflar).
+    def duz_sayfa(self, i: int, metin: str, onceki_gorunum: list[str] | None = None) -> None:
+        self.metin[i] = metin
+        self.gorunum[i] = (onceki_gorunum or []) + [html_okuma.duz_metinden_gorunum(metin)]
+        self.bilgi[i]["karakter"] = len(metin)
+
+
+def _okuma_bicimi(yontemler: set[str]) -> str:
+    """Sayfaların okunuşundan belgenin okuma biçimi: pdf_metin / ocr / karisik / okunamadi."""
+    okuyan = yontemler - {"okunamadi"}
+    if not okuyan:
+        return "okunamadi"
+    if okuyan <= {"yazi"}:
+        return "pdf_metin"
+    return "karisik" if "yazi" in okuyan else "ocr"
+
+
 def pdf_oku(pdf_yolu: Path, kok: Path, goruntu_klasoru: str, onbellek_yolu: Path | None = None,
             ocr_acik: bool | None = None, paralel: int | None = None,
             ilerle=lambda yapilan, toplam: None) -> PdfOkuma:
     """`kok` arşiv klasörü; sayfa ve tablo görüntüleri kok/goruntu_klasoru altına yazılır, yolları ona göre döner.
     `ocr_acik` verilmezse Tesseract varsa OCR yapılır."""
-    if ocr_acik is None:
-        ocr_acik = ocr.ocr_kullanilabilir()
-    paralel = paralel or ocr.paralel_sayisi()
-    onbellek = _Onbellek(onbellek_yolu)
-    sayfa_metni: dict[int, str] = {}
-    sayfa_gorunumu: dict[int, list[str]] = {}
-    bilgiler: dict[int, dict] = {}
-    arama: dict[int, str] = {}
-    kusurlar: list[str] = []
+    o = _Okunus(pdf_yolu, kok, goruntu_klasoru)
     ocr_gereken: list[tuple[int, str]] = []
-
     with pdfplumber.open(str(pdf_yolu)) as pdf:
         sayfa_sayisi = len(pdf.pages)
         for i, sayfa in enumerate(pdf.pages):
-            bilgi = {"no": i + 1, "yontem": "yazi", "karakter": 0, "uyari": [], "goruntu": None,
-                     "tablo_yapi": 0, "tablo_goruntu": 0}
-            bilgiler[i] = bilgi
-            try:
-                yazi = md.temizle(sayfa.extract_text() or "")
-                sorun = yazi_sorunu(yazi, _resim_orani(sayfa))
-                if sorun:
-                    bilgi["uyari"].append(sorun)
-                    ocr_gereken.append((i, yazi))
-                    continue
-                metin_parcalari, gorunum_parcalari = _yazili_sayfa(sayfa, i, kok, goruntu_klasoru, bilgi)
-                sayfa_metni[i] = "\n".join(metin_parcalari)
-                sayfa_gorunumu[i] = gorunum_parcalari
-                bilgi["karakter"] = len(sayfa_metni[i])
-            except Exception as e:  # tek sayfanın hatası belgeyi düşürmesin
-                log.warning("PDF sayfası okunamadı %s s.%d: %r", pdf_yolu, i + 1, e)
-                bilgi["uyari"].append(f"yazı katmanı okunamadı: {e!r}"[:200])
-                ocr_gereken.append((i, ""))
-            finally:
-                if hasattr(sayfa, "close"):
-                    sayfa.close()
+            o.bilgi[i] = {"no": i + 1, "yontem": "yazi", "karakter": 0, "uyari": [], "goruntu": None,
+                          "tablo_yapi": 0, "tablo_goruntu": 0}
+            if (yazi := _yazi_katmanini_oku(o, sayfa, i)) is not None:
+                ocr_gereken.append((i, yazi))
             ilerle(i + 1, sayfa_sayisi)
-
     if ocr_gereken:
-        _ocr_sayfalari(pdf_yolu, kok, goruntu_klasoru, ocr_gereken, ocr_acik, paralel, onbellek,
-                       sayfa_metni, sayfa_gorunumu, bilgiler, arama, kusurlar)
-
-    yontemler = {b["yontem"] for b in bilgiler.values()}
-    okuyan = yontemler - {"okunamadi"}
-    if not okuyan:
-        okuma = "okunamadi"
-    elif okuyan <= {"yazi"}:
-        okuma = "pdf_metin"
-    elif "yazi" in okuyan:
-        okuma = "karisik"
-    else:
-        okuma = "ocr"
+        acik = ocr.ocr_kullanilabilir() if ocr_acik is None else ocr_acik
+        sonuclar = _ocr_calistir(pdf_yolu, [i for i, _ in ocr_gereken], acik, paralel or ocr.paralel_sayisi(),
+                                 _Onbellek(onbellek_yolu))
+        _ocr_sonuclarini_yaz(o, ocr_gereken, sonuclar)
     sirali = range(sayfa_sayisi)
-    metin = "\n\n".join(sayfa_metni[i] for i in sirali if sayfa_metni.get(i))
-    gorunum = "\n".join(
-        f'<section class="sayfa" data-sayfa="{i + 1}"><p class="sayfa-no">s. {i + 1}</p>' + "\n".join(sayfa_gorunumu.get(i, []))
-        + "</section>" for i in sirali)
-    for k in md.kalinti_kusurlari(metin):
-        kusurlar.append(k)
-    return PdfOkuma(metin=metin, gorunum=gorunum, okuma=okuma, sayfa_sayisi=sayfa_sayisi,
-                    sayfalar=[bilgiler[i] for i in sirali], arama_metni="\n\n".join(arama[i] for i in sorted(arama)),
-                    kusurlar=kusurlar)
+    metin = "\n\n".join(o.metin[i] for i in sirali if o.metin.get(i))
+    gorunum = "\n".join(f'<section class="sayfa" data-sayfa="{i + 1}"><p class="sayfa-no">s. {i + 1}</p>'
+                        + "\n".join(o.gorunum.get(i, [])) + "</section>" for i in sirali)
+    return PdfOkuma(metin=metin, gorunum=gorunum, okuma=_okuma_bicimi({b["yontem"] for b in o.bilgi.values()}),
+                    sayfa_sayisi=sayfa_sayisi, sayfalar=[o.bilgi[i] for i in sirali],
+                    arama_metni="\n\n".join(o.arama[i] for i in sorted(o.arama)),
+                    kusurlar=o.kusurlar + md.kalinti_kusurlari(metin))
 
 
-def _yazili_sayfa(sayfa, i: int, kok: Path, goruntu_klasoru: str, bilgi: dict) -> tuple[list[str], list[str]]:
-    """Yazı katmanı iyi olan sayfa. Tablo varsa tablonun üstü, tablo, altı sırasıyla."""
-    tablolar = []
+def _yazi_katmanini_oku(o: _Okunus, sayfa, i: int) -> str | None:
+    """Yazı katmanı iyiyse sayfayı yazar ve None döner; değilse OCR'a gidecek ham yazıyı döner."""
+    bilgi = o.bilgi[i]
+    try:
+        yazi = md.temizle(sayfa.extract_text() or "")
+        if sorun := yazi_sorunu(yazi, _resim_orani(sayfa)):
+            bilgi["uyari"].append(sorun)
+            return yazi
+        metin, gorunum = _yazili_sayfa(sayfa, i, o)
+        o.metin[i], o.gorunum[i], bilgi["karakter"] = "\n".join(metin), gorunum, len("\n".join(metin))
+        return None
+    except Exception as e:  # tek sayfanın hatası belgeyi düşürmesin
+        log.warning("PDF sayfası okunamadı %s s.%d: %r", o.pdf_yolu, i + 1, e)
+        bilgi["uyari"].append(f"yazı katmanı okunamadı: {e!r}"[:200])
+        return ""
+    finally:
+        if hasattr(sayfa, "close"):
+            sayfa.close()
+
+
+def _tablolari_bul(sayfa, bilgi: dict) -> list:
     cizgi = len(sayfa.lines) + len(sayfa.rects)
     if cizgi > TABLO_ARAMA_EN_FAZLA_CIZGI:
         # Vektör çizim (harita, kroki): tablo araması dakikalarca sürebiliyor ve tablo bulmuyor.
         bilgi["uyari"].append(f"çizim sayfası ({cizgi} çizgi), tablo aranmadı")
-    elif cizgi >= 4:
-        try:
-            tablolar = sorted(sayfa.find_tables(), key=lambda t: t.bbox[1])
-        except Exception as e:
-            bilgi["uyari"].append(f"tablo bulunamadı: {e!r}"[:200])
+        return []
+    if cizgi < 4:
+        return []
+    try:
+        return sorted(sayfa.find_tables(), key=lambda t: t.bbox[1])
+    except Exception as e:
+        bilgi["uyari"].append(f"tablo bulunamadı: {e!r}"[:200])
+        return []
+
+
+def _tablo_ekle(sayfa, tablo, i: int, n: int, o: _Okunus, metin: list[str], gorunum: list[str]) -> None:
+    """Tablonun satırları metne ("hücre | hücre"); görünüme güvenilirse HTML tablo, değilse sayfadan kesilmiş görüntü."""
+    bilgi = o.bilgi[i]
+    satirlar = tablo.extract() or []
+    satir_metni = [md.paragraflari_duzenle(s) for s in (" | ".join(_hucre(h) for h in r if _hucre(h)) for r in satirlar)
+                   if s.strip()]
+    if satir_metni:
+        metin.append("\n".join(satir_metni))
+    if _tablo_guvenilir(satirlar):
+        gorunum.append(_tablo_html(satirlar))
+        bilgi["tablo_yapi"] += 1
+        return
+    x0, top, x1, bottom = tablo.bbox
+    yol = o.goruntu_yolu(i, f"-tablo{n + 1}")
+    hedef = o.kok / yol
+    if not hedef.exists():
+        hedef.parent.mkdir(parents=True, exist_ok=True)
+        kutu = (max(0, x0 - 4), max(0, top - 4), min(sayfa.width, x1 + 4), min(sayfa.height, bottom + 4))
+        sayfa.crop(kutu).to_image(resolution=GORUNTU_DPI).save(str(hedef))
+    gorunum.append(_goruntu_html(yol, f"s. {i + 1} tablo {n + 1}", "tablo-goruntusu"))
+    bilgi["tablo_goruntu"] += 1
+
+
+def _yazili_sayfa(sayfa, i: int, o: _Okunus) -> tuple[list[str], list[str]]:
+    """Yazı katmanı iyi olan sayfa. Tablo varsa tablonun üstü, tablo, altı sırasıyla."""
     metin, gorunum = [], []
 
     def yazi_ekle(parca: str) -> None:
-        duz = md.satirlari_birlestir(parca)
-        if duz:
+        if duz := md.satirlari_birlestir(parca):
             metin.append(duz)
             gorunum.append(html_okuma.duz_metinden_gorunum(duz))
 
+    tablolar = _tablolari_bul(sayfa, o.bilgi[i])
     if not tablolar:
         yazi_ekle(sayfa.extract_text() or "")
         return metin, gorunum
     ust = 0.0
     for n, t in enumerate(tablolar):
-        x0, top, x1, bottom = t.bbox
+        top, bottom = t.bbox[1], t.bbox[3]
         if top > ust + 1:
             yazi_ekle(sayfa.crop((0, ust, sayfa.width, min(top, sayfa.height))).extract_text() or "")
-        satirlar = t.extract() or []
-        satir_metni = [" | ".join(_hucre(h) for h in s if _hucre(h)) for s in satirlar]
-        satir_metni = [md.paragraflari_duzenle(s) for s in satir_metni if s.strip()]
-        if satir_metni:
-            metin.append("\n".join(satir_metni))
-        if _tablo_guvenilir(satirlar):
-            gorunum.append(_tablo_html(satirlar))
-            bilgi["tablo_yapi"] += 1
-        else:
-            yol = f"{goruntu_klasoru}/s{i + 1}-tablo{n + 1}.png"
-            hedef = kok / yol
-            if not hedef.exists():
-                hedef.parent.mkdir(parents=True, exist_ok=True)
-                sayfa.crop((max(0, x0 - 4), max(0, top - 4), min(sayfa.width, x1 + 4), min(sayfa.height, bottom + 4))) \
-                    .to_image(resolution=GORUNTU_DPI).save(str(hedef))
-            gorunum.append(_goruntu_html(yol, f"s. {i + 1} tablo {n + 1}", "tablo-goruntusu"))
-            bilgi["tablo_goruntu"] += 1
+        _tablo_ekle(sayfa, t, i, n, o, metin, gorunum)
         ust = max(ust, bottom)
     if ust < sayfa.height - 1:
         yazi_ekle(sayfa.crop((0, ust, sayfa.width, sayfa.height)).extract_text() or "")
     return metin, gorunum
 
 
-def _ocr_sayfalari(pdf_yolu: Path, kok: Path, goruntu_klasoru: str, gereken: list[tuple[int, str]], ocr_acik: bool,
-                   paralel: int, onbellek: _Onbellek, sayfa_metni: dict, sayfa_gorunumu: dict, bilgiler: dict,
-                   arama: dict, kusurlar: list[str]) -> None:
-    sonuclar: dict[int, str | Exception] = {}
-    bekleyen = [(i, y) for i, y in gereken if onbellek.al(i) is None]
-    for i, _ in gereken:
-        if (o := onbellek.al(i)) is not None:
-            sonuclar[i] = o
-    if bekleyen and ocr_acik:
-        pdf = pypdfium2.PdfDocument(str(pdf_yolu))
-        try:
-            with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(max_workers=paralel) as havuz:
-                isler: dict[int, Future] = {}
+def _ocr_calistir(pdf_yolu: Path, sayfalar: list[int], acik: bool, paralel: int,
+                  onbellek: _Onbellek) -> dict[int, str | Exception]:
+    """Sayfaları OCR'lar (paralel), sonucu önbelleğe yazar. Önbellekte olanlar yeniden okunmaz. Okunamayan sayfanın
+    sonucu hata nesnesidir; OCR kapalıysa önbellekte olmayan sayfa sonuçta hiç yer almaz."""
+    sonuclar: dict[int, str | Exception] = {i: o for i in sayfalar if (o := onbellek.al(i)) is not None}
+    bekleyen = [i for i in sayfalar if i not in sonuclar]
+    if not (bekleyen and acik):
+        return sonuclar
+    pdf = pypdfium2.PdfDocument(str(pdf_yolu))
+    try:
+        with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(max_workers=paralel) as havuz:
+            isler: dict[int, Future] = {}
 
-                def topla(bitene_kadar: bool) -> None:
-                    for no in list(isler):
-                        if bitene_kadar or isler[no].done():
-                            try:
-                                sonuclar[no] = isler.pop(no).result()
-                                onbellek.koy(no, sonuclar[no])
-                            except Exception as e:
-                                sonuclar[no] = e
-                            png = Path(tmp) / f"{no}.png"
-                            png.unlink(missing_ok=True)
-
-                for i, _ in bekleyen:
-                    # Görüntü çevirme (pdfium) iş parçacığı güvenli değil, ana iş parçacığında yapılır.
-                    png = Path(tmp) / f"{i}.png"
+            def topla(bitene_kadar: bool) -> None:
+                for no in [n for n in isler if bitene_kadar or isler[n].done()]:
                     try:
-                        _render(pdf, i, png, ocr.DPI)
+                        sonuclar[no] = isler.pop(no).result()
+                        onbellek.koy(no, sonuclar[no])
                     except Exception as e:
-                        sonuclar[i] = e
-                        continue
-                    isler[i] = havuz.submit(ocr.goruntu_oku, png, ocr.SAYFA_ZAMAN_ASIMI, paralel > 1)
-                    # Bellekte/diskte en fazla 2 x paralel sayfa görüntüsü dursun.
-                    while len(isler) >= 2 * paralel:
-                        isler[next(iter(isler))].exception()  # en eski iş bitene kadar bekle
-                        topla(False)
-                topla(True)
-        finally:
-            pdf.close()
+                        sonuclar[no] = e
+                    (Path(tmp) / f"{no}.png").unlink(missing_ok=True)
 
+            for i in bekleyen:
+                png = Path(tmp) / f"{i}.png"
+                try:
+                    _render(pdf, i, png, ocr.DPI)  # pdfium iş parçacığı güvenli değil, ana iş parçacığında
+                except Exception as e:
+                    sonuclar[i] = e
+                    continue
+                isler[i] = havuz.submit(ocr.goruntu_oku, png, ocr.SAYFA_ZAMAN_ASIMI, paralel > 1)
+                # Diskte en fazla 2 x paralel sayfa görüntüsü dursun: en eski iş bitene kadar bekle.
+                while len(isler) >= 2 * paralel:
+                    isler[next(iter(isler))].exception()
+                    topla(False)
+            topla(True)
+    finally:
+        pdf.close()
+    return sonuclar
+
+
+def _cumle_satiri_mi(satir: str) -> bool:
+    """En az 5 sözlük kelimesi olan ve küçük harfi büyük harfinden çok olan satır (başlık değil, cümle)."""
+    if sum(c.islower() for c in satir) <= sum(c.isupper() for c in satir):
+        return False
+    return sum(1 for k in md._KELIME.findall(md.kucuk(satir)) if k in md.sozluk()) >= 5
+
+
+def ocr_sinifi(sonuc: str) -> tuple[str, str | None]:
+    """OCR sonucunun sınıfı ve uyarısı (çöp oranı ölçümüyle, GURULTULU_COP / GORSEL_COP):
+    "gorsel"       harita, fotoğraf: yazı anlamsız, metne girmez, sadece arama; panelde sayfa görüntüsü
+    "ocr_goruntu"  taranmış tablo, kroki, az yazılı ya da gürültülü sayfa: panelde görüntü, yazı metinde
+    "ocr"          düz OCR metni"""
+    cop, parca = md.cop_orani(sonuc)
+    if not sonuc.strip() or cop >= GORSEL_COP or md.anlamsiz_mi(sonuc, en_az_kelime=20):
+        return "gorsel", None
+    if sum(1 for s in sonuc.split("\n") if s.count("|") >= 2) >= 5:
+        return "ocr_goruntu", "taranmış tablo"
+    # Az yazılı sayfa (kroki, şekil etiketi) görüntüyle gösterilir; içinde düzgün bir cümle satırı varsa (kısa karar
+    # sayfası) metin olarak kalır. Büyük harfli başlık satırı ("MERSİN İLİ ... KOORDİNAT ÇİZELGESİ") cümle sayılmaz.
+    if parca < AZ_YAZI and not any(_cumle_satiri_mi(s) for s in sonuc.split("\n")):
+        return "ocr_goruntu", "az yazılı sayfa"
+    if cop >= GURULTULU_COP:
+        return "ocr_goruntu", f"OCR gürültülü (%{cop * 100:.0f})"
+    return "ocr", None
+
+
+def _okunamadi(o: _Okunus, i: int, yazi: str, sonuc: Exception | None) -> None:
+    neden = "OCR yapılamadı (Tesseract yok)" if sonuc is None else f"OCR hatası: {sonuc}"
+    o.bilgi[i]["yontem"] = "okunamadi"
+    o.bilgi[i]["uyari"].append(neden[:200])
+    o.kusurlar.append(f"s. {i + 1} okunamadı: {neden[:120]}")
+    # Yazı katmanında az da olsa temiz yazı varsa o kalır.
+    if len(yazi.strip()) >= YAZI_ESIGI and not md.kalinti_kusurlari(yazi):
+        o.duz_sayfa(i, md.satirlari_birlestir(yazi))
+
+
+def _ocr_sonuclarini_yaz(o: _Okunus, gereken: list[tuple[int, str]], sonuclar: dict[int, str | Exception]) -> None:
     goruntu_pdf = None
     try:
         for i, yazi in gereken:
-            bilgi = bilgiler[i]
             sonuc = sonuclar.get(i)
             if sonuc is None or isinstance(sonuc, Exception):
-                neden = "OCR yapılamadı (Tesseract yok)" if sonuc is None else f"OCR hatası: {sonuc}"
-                bilgi["yontem"], bilgi["uyari"] = "okunamadi", bilgi["uyari"] + [neden[:200]]
-                kusurlar.append(f"s. {i + 1} okunamadı: {neden[:120]}")
-                if len(yazi.strip()) >= YAZI_ESIGI and not md.kalinti_kusurlari(yazi):
-                    sayfa_metni[i] = md.satirlari_birlestir(yazi)
-                    sayfa_gorunumu[i] = [html_okuma.duz_metinden_gorunum(sayfa_metni[i])]
+                _okunamadi(o, i, yazi, sonuc)
                 continue
-            cop, parca = md.cop_orani(sonuc)
-            tablo_gibi = sum(1 for s in sonuc.split("\n") if s.count("|") >= 2) >= 5
-            gorsel = not sonuc.strip() or cop >= GORSEL_COP or md.anlamsiz_mi(sonuc, en_az_kelime=20)
-            # Az yazılı sayfa (kroki, şekil etiketi) görüntüyle gösterilir; ama içinde düzgün bir cümle satırı varsa
-            # (kısa karar sayfası) metin olarak kalır.
-            cumleli = any(sum(1 for k in md._KELIME.findall(md.kucuk(satir)) if k in md.sozluk()) >= 5
-                          for satir in sonuc.split("\n"))
-            goruntulu = gorsel or cop >= GURULTULU_COP or tablo_gibi or (parca < AZ_YAZI and not cumleli)
-            if goruntulu:
-                yol = f"{goruntu_klasoru}/s{i + 1}.png"
-                if not (kok / yol).exists():
-                    if goruntu_pdf is None:
-                        goruntu_pdf = pypdfium2.PdfDocument(str(pdf_yolu))
-                    _render(goruntu_pdf, i, kok / yol, GORUNTU_DPI)
-                bilgi["goruntu"] = yol
-            if gorsel:
-                # Harita, fotoğraf: OCR yazısı anlamsız, metne girmez, sadece arama.
-                bilgi["yontem"] = "gorsel"
-                arama[i] = sonuc
-                sayfa_metni[i] = (f"[s. {i + 1}: görüntü olarak saklandı (harita, şekil ya da okunamayan tablo), "
-                                  "orijinal PDF'e bakınız]")
-                sayfa_gorunumu[i] = [_goruntu_html(yol, f"s. {i + 1}")]
+            sinif, uyari = ocr_sinifi(sonuc)
+            bilgi = o.bilgi[i]
+            bilgi["yontem"] = sinif
+            if uyari:
+                bilgi["uyari"].append(uyari)
+            if sinif == "ocr":
+                o.duz_sayfa(i, md.satirlari_birlestir(sonuc))
                 continue
-            sayfa_metni[i] = md.satirlari_birlestir(sonuc)
-            bilgi["karakter"] = len(sayfa_metni[i])
-            if goruntulu:
-                # Taranmış tablo, kroki, az yazılı sayfa: panelde sayfanın kendisi, OCR yazısı metinde (arama ve fark).
-                bilgi["yontem"] = "ocr_goruntu"
-                bilgi["uyari"].append(
-                    "taranmış tablo" if tablo_gibi else "az yazılı sayfa" if parca < AZ_YAZI else f"OCR gürültülü (%{cop * 100:.0f})")
-                sayfa_gorunumu[i] = [_goruntu_html(yol, f"s. {i + 1}"),
-                                     '<details class="ocr-metni"><summary>OCR ile okunan yazı</summary>'
-                                     + html_okuma.duz_metinden_gorunum(sayfa_metni[i]) + "</details>"]
+            yol = o.goruntu_yolu(i)
+            if not (o.kok / yol).exists():
+                goruntu_pdf = goruntu_pdf or pypdfium2.PdfDocument(str(o.pdf_yolu))
+                _render(goruntu_pdf, i, o.kok / yol, GORUNTU_DPI)
+            bilgi["goruntu"] = yol
+            resim = _goruntu_html(yol, f"s. {i + 1}")
+            if sinif == "gorsel":
+                o.arama[i] = sonuc
+                o.metin[i] = (f"[s. {i + 1}: görüntü olarak saklandı (harita, şekil ya da okunamayan tablo), "
+                              "orijinal PDF'e bakınız]")
+                o.gorunum[i] = [resim]
                 continue
-            bilgi["yontem"] = "ocr"
-            sayfa_gorunumu[i] = [html_okuma.duz_metinden_gorunum(sayfa_metni[i])]
+            metin = md.satirlari_birlestir(sonuc)
+            o.duz_sayfa(i, metin)
+            o.gorunum[i] = [resim, '<details class="ocr-metni"><summary>OCR ile okunan yazı</summary>'
+                            + html_okuma.duz_metinden_gorunum(metin) + "</details>"]
     finally:
         if goruntu_pdf is not None:
             goruntu_pdf.close()

@@ -368,9 +368,12 @@ def _degisiklik_kaydi(
     if izlenen.konu:
         eslesen.setdefault(izlenen.konu, ["(takip listesindeki mevzuat)"])
     icerik = fark_metni(fark_listesi)
-    for konu, kelimeler in eslesmeler(icerik, konular).items():  # değişen metinde geçen konular da (iş kolu genişler)
-        mevcut = eslesen.setdefault(konu, [])
-        mevcut += [f"{k} (değişiklikte)" for k in kelimeler if k not in mevcut]
+    # Değişen maddeler de puanlanır (arşivle aynı puan): KDV tebliğinin altın bölümü değiştiyse Kuyum'a da gider,
+    # değişen metinde bir kez "altın" geçmesi ise yetmez.
+    from mevzuat import arama, pipeline
+
+    eslesen = pipeline.icerikle_eslesmeler("", icerik, konular, eslesen, arama.kelime_agirliklari(session),
+                                           ek="(değişiklikte)")
     kayit = Kayit(
         kaynak=KAYNAK_ADI,
         # Sürüm numarası, metin eski haline dönse bile her değişiklik ayrı kayıttır.

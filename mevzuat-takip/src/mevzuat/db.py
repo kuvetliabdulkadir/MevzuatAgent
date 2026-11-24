@@ -355,6 +355,44 @@ class ArsivSurumu(Base):
     rg_notlari: Mapped[list] = mapped_column(JSON, default=list)
 
 
+# Arşivde tam metin araması (Faz 2, karar 14): son sürümün madde madde, Türkçe küçük harfe çevrilmiş metni.
+class ArsivArama(Base):
+    """Her mevzuatın son sürümü maddelere bölünür (surum.bolumler), ekler ve görsel sayfaların OCR yazısı da ayrı satır.
+    PostgreSQL'de metin üzerinde tam metin indeksi (GIN, 'simple') vardır; aday satırlar oradan, ek kuralı ve vurgu
+    Python'da (arama.py). SQLite'ta (yerel) düz tarama."""
+
+    __tablename__ = "arsiv_arama"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anahtar: Mapped[str] = mapped_column(ForeignKey("arsiv_mevzuat.anahtar"), index=True)
+    surum_no: Mapped[int]
+    sira: Mapped[int]
+    bolum: Mapped[str] = mapped_column(String(300))
+    # Aramada kullanılan, Türkçe küçük harfe çevrilmiş metin.
+    metin: Mapped[str] = mapped_column(Text)
+    # Gösterilecek özgün metin (vurgulu parça buradan).
+    ozgun: Mapped[str] = mapped_column(Text)
+
+    __table_args__ = (Index("ix_arsiv_arama_tsv", text("to_tsvector('simple', metin)"),
+                            postgresql_using="gin").ddl_if(dialect="postgresql"),)
+
+
+# Arşivdeki mevzuatın konu filtresi sonucu (Faz 3): kademe yok, ilgili ya da değil (karar 18), puan arka planda.
+class ArsivKonu(Base):
+    """Her (mevzuat, konu) için son sürümün puanı. `kanit` panelde "neden ilgili" olarak görünür [{kelime, bolum, tur, parca}].
+    Konular ya da metin değişince yeniden hesaplanır (puan.py, arama.py: konulari_uygula)."""
+
+    __tablename__ = "arsiv_konu"
+
+    anahtar: Mapped[str] = mapped_column(ForeignKey("arsiv_mevzuat.anahtar"), primary_key=True)
+    konu: Mapped[str] = mapped_column(String(200), primary_key=True, index=True)
+    surum_no: Mapped[int]
+    puan: Mapped[float]
+    ilgili: Mapped[bool] = mapped_column(index=True)
+    kanit: Mapped[list] = mapped_column(JSON, default=list)
+    hesaplandi: Mapped[datetime]
+
+
 # Arşivdeki her dosyanın (ek, arşiv içinden çıkan dosya, sayfa resmi) okunmuş hali. Aynı dosya bir kez işlenir.
 class ArsivDosyasi(Base):
     """Orijinal dosya diskte `yol`da durur, hiç değiştirilmez ("İndir" onu verir). `metin` arama ve fark için,

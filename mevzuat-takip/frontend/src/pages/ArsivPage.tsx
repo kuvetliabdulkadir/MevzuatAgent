@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Archive, Loader2, Play, ScrollText, Search, Square, X } from 'lucide-react';
 import { api } from '../api';
-import { ArsivDurumu, ArsivGunlugu, ArsivListesi, ArsivMetinDurumu } from '../types/api';
+import { ArsivAramaSonucu, ArsivDurumu, ArsivGunlugu, ArsivKonulari, ArsivListesi, ArsivMetinDurumu } from '../types/api';
 import { MesajKutusu } from '../bicim';
 import { tarihSaat } from '../tarih';
 import { MevzuatPenceresi } from './ArsivMevzuat';
@@ -226,71 +226,139 @@ const SayilarKarti: React.FC<{ durum: ArsivDurumu }> = ({ durum }) => (
 const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string) => void }> = ({ turler, onSec }) => {
   const [ara, setAra] = useState('');
   const [aranan, setAranan] = useState('');
+  // "ad": başlıkta/anahtarda ara (liste), "metin": tam metinde ara (Faz 2).
+  const [kip, setKip] = useState<'ad' | 'metin'>('ad');
   const [tur, setTur] = useState('');
   const [durum, setDurum] = useState('');
+  // "": hepsi, "*": herhangi bir konuyla ilgili, konu adı: o konuyla ilgili (Faz 3).
+  const [konu, setKonu] = useState('');
   const [sayfa, setSayfa] = useState(1);
   const [liste, setListe] = useState<ArsivListesi | null>(null);
+  const [sonuc, setSonuc] = useState<ArsivAramaSonucu | null>(null);
+  const [konular, setKonular] = useState<ArsivKonulari | null>(null);
   const [hata, setHata] = useState('');
+  const [yukleniyor, setYukleniyor] = useState(false);
 
+  useEffect(() => { api.get<ArsivKonulari>('/arsiv/konular').then(setKonular).catch(() => setKonular(null)); }, []);
   useEffect(() => {
-    const q = new URLSearchParams({ ara: aranan, tur, durum, sayfa: String(sayfa) });
+    if (kip === 'metin') {
+      if (!aranan.trim()) { setSonuc(null); return; }
+      setYukleniyor(true);
+      const q = new URLSearchParams({ q: aranan, tur, konu: konu === '*' ? '' : konu, sayfa: String(sayfa) });
+      api.get<ArsivAramaSonucu>(`/arsiv/ara?${q}`).then((r) => { setSonuc(r); setHata(''); })
+        .catch((e) => setHata(e.message)).finally(() => setYukleniyor(false));
+      return;
+    }
+    const q = new URLSearchParams({ ara: aranan, tur, durum, konu, sayfa: String(sayfa) });
     api.get<ArsivListesi>(`/arsiv/liste?${q}`).then((l) => { setListe(l); setHata(''); }).catch((e) => setHata(e.message));
-  }, [aranan, tur, durum, sayfa]);
-  const sayfaSayisi = liste ? Math.max(1, Math.ceil(liste.toplam / liste.boyut)) : 1;
+  }, [kip, aranan, tur, durum, konu, sayfa]);
+  const toplam = kip === 'metin' ? (sonuc?.toplam ?? 0) : (liste?.toplam ?? 0);
+  const boyut = kip === 'metin' ? (sonuc?.boyut ?? 20) : (liste?.boyut ?? 50);
+  const sayfaSayisi = Math.max(1, Math.ceil(toplam / boyut));
+  const turAdi = (kod: string) => turler.find((t) => t.kod === kod)?.ad ?? kod;
 
   return (
     <div className="bg-white rounded-xl border border-paper-300 overflow-hidden text-xs">
-      <form className="px-4 sm:px-5 py-3 border-b border-paper-200 flex flex-col sm:flex-row gap-2"
+      <form className="px-4 sm:px-5 py-3 border-b border-paper-200 space-y-2"
         onSubmit={(e) => { e.preventDefault(); setSayfa(1); setAranan(ara); }}>
-        <div className="flex-1 flex items-center gap-1.5 border border-paper-300 rounded-lg px-2.5">
-          <Search className="w-3.5 h-3.5 text-stone-400" />
-          <input value={ara} onChange={(e) => setAra(e.target.value)} placeholder="Ad ya da anahtar (1.5.4760) ara"
-            className="flex-1 py-2 outline-none bg-transparent" />
+        <div className="flex flex-col sm:flex-row gap-2">
+          <span className="flex rounded-lg border border-paper-300 overflow-hidden shrink-0">
+            {([['ad', 'Adında ara'], ['metin', 'Metninde ara']] as const).map(([k, ad]) => (
+              <button key={k} type="button" onClick={() => { setKip(k); setSayfa(1); }}
+                className={`px-2.5 py-2 cursor-pointer ${kip === k ? 'bg-petrol text-white' : 'hover:bg-paper-100'}`}>{ad}</button>
+            ))}
+          </span>
+          <div className="flex-1 flex items-center gap-1.5 border border-paper-300 rounded-lg px-2.5">
+            <Search className="w-3.5 h-3.5 text-stone-400" />
+            <input value={ara} onChange={(e) => setAra(e.target.value)}
+              placeholder={kip === 'metin' ? 'Kelime ya da "tırnak içinde ifade" (altın, "kıymetli maden", vergi*)' : 'Ad ya da anahtar (1.5.4760) ara'}
+              className="flex-1 py-2 outline-none bg-transparent" />
+          </div>
+          <button type="submit" className="px-3 py-2 rounded-lg bg-petrol text-white font-semibold hover:bg-petrol-dark cursor-pointer">Ara</button>
         </div>
-        <select value={tur} onChange={(e) => { setTur(e.target.value); setSayfa(1); }} className="border border-paper-300 rounded-lg px-2 py-2 bg-white">
-          <option value="">Bütün türler</option>
-          {turler.map((t) => <option key={t.kod} value={t.kod}>{t.ad}</option>)}
-        </select>
-        <select value={durum} onChange={(e) => { setDurum(e.target.value); setSayfa(1); }} className="border border-paper-300 rounded-lg px-2 py-2 bg-white">
-          <option value="">Bütün durumlar</option>
-          {DURUM_SIRASI.map((d) => <option key={d} value={d}>{METIN_DURUMU[d].ad}</option>)}
-          <option value="KUSURLU">Okuması kusurlu</option>
-          <option value="KALKTI">Siteden kalkan</option>
-        </select>
-        <button type="submit" className="px-3 py-2 rounded-lg bg-petrol text-white font-semibold hover:bg-petrol-dark cursor-pointer">Ara</button>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <select value={konu} onChange={(e) => { setKonu(e.target.value); setSayfa(1); }} className="border border-paper-300 rounded-lg px-2 py-2 bg-white">
+            <option value="">Bütün mevzuat</option>
+            <option value="*">Sadece ilgili olanlar{konular ? ` (${konular.toplam_ilgili.toLocaleString('tr-TR')})` : ''}</option>
+            {konular?.konular.map((k) => <option key={k.ad} value={k.ad}>İlgili: {k.ad} ({k.ilgili.toLocaleString('tr-TR')})</option>)}
+          </select>
+          <select value={tur} onChange={(e) => { setTur(e.target.value); setSayfa(1); }} className="border border-paper-300 rounded-lg px-2 py-2 bg-white">
+            <option value="">Bütün türler</option>
+            {turler.map((t) => <option key={t.kod} value={t.kod}>{t.ad}</option>)}
+          </select>
+          {kip === 'ad' && (
+            <select value={durum} onChange={(e) => { setDurum(e.target.value); setSayfa(1); }} className="border border-paper-300 rounded-lg px-2 py-2 bg-white">
+              <option value="">Bütün durumlar</option>
+              {DURUM_SIRASI.map((d) => <option key={d} value={d}>{METIN_DURUMU[d].ad}</option>)}
+              <option value="KUSURLU">Okuması kusurlu</option>
+              <option value="KALKTI">Siteden kalkan</option>
+            </select>
+          )}
+        </div>
+        {konular && !konular.guncel && konular.toplam_ilgili > 0 && (
+          <p className="text-amber-700">Konular değişti; ilgili listesi yeniden hesaplanıyor (zamanlayıcı birkaç dakika içinde bitirir).</p>
+        )}
       </form>
       {hata && <p className="px-5 py-3 text-rose-700">{hata}</p>}
-      {liste && (
-        <>
-          <div className="divide-y divide-paper-200">
-            {liste.satirlar.length === 0 && <p className="px-5 py-4 text-stone-500">Sonuç yok.</p>}
-            {liste.satirlar.map((m) => (
-              <button key={m.anahtar} type="button" onClick={() => onSec(m.anahtar)}
-                className="w-full text-left px-4 sm:px-5 py-2.5 hover:bg-paper-100 cursor-pointer flex flex-col sm:flex-row sm:items-start justify-between gap-1">
-                <span className="text-stone-800 min-w-0">
-                  <span className="font-medium">{m.ad}</span>
-                  <span className="block text-stone-500">
-                    {m.tur_adi} · RG {tarihSaat(m.rg_tarihi)}{m.rg_sayisi ? ` / ${m.rg_sayisi}` : ''} · {m.anahtar}
-                    {m.mulga && ' · mülga'}{m.kalkti && ` · siteden kalktı (${tarihSaat(m.kalkti)})`}
-                  </span>
+      {kip === 'metin' && (
+        <div className="divide-y divide-paper-200">
+          {yukleniyor && <p className="px-5 py-4 text-stone-500 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Aranıyor…</p>}
+          {!yukleniyor && !sonuc && <p className="px-5 py-4 text-stone-500">Metinlerde aramak için bir kelime ya da "ifade" yazın. Kelimenin ekli halleri de bulunur (altın → altının), başka kelimeler bulunmaz (Altınbaş).</p>}
+          {!yukleniyor && sonuc && sonuc.sonuclar.length === 0 && <p className="px-5 py-4 text-stone-500">Sonuç yok.</p>}
+          {!yukleniyor && sonuc?.eksik && <p className="px-5 py-2 text-amber-700">Çok fazla sonuç var, ilk kısmı gösteriliyor. Aramayı daraltın (ifade ya da tür).</p>}
+          {!yukleniyor && sonuc?.sonuclar.map((r) => (
+            <button key={r.anahtar} type="button" onClick={() => onSec(r.anahtar)}
+              className="w-full text-left px-4 sm:px-5 py-2.5 hover:bg-paper-100 cursor-pointer space-y-1">
+              <span className="block font-medium text-stone-800">{r.ad}</span>
+              <span className="block text-stone-500">
+                {turAdi(r.tur)} · RG {tarihSaat(r.rg_tarihi)} · {r.anahtar}
+                {r.baslikta && ' · başlıkta geçiyor'}{r.madde_sayisi > 0 && ` · ${r.madde_sayisi} bölümde ${r.gecis} kez`}
+              </span>
+              {r.parcalar.map((p, i) => (
+                <span key={i} className="block arsiv-arama-parcasi">
+                  <span className="font-semibold text-stone-600">{p.bolum}: </span>
+                  {/* Parça sunucuda HTML kaçışlı üretilir, sadece <mark> içerir (arama.py, _vurgula). */}
+                  <span dangerouslySetInnerHTML={{ __html: p.parca }} />
                 </span>
-                <span className={`shrink-0 ${(METIN_DURUMU[m.durum] ?? METIN_DURUMU.HATA).renk}`}>
-                  {(METIN_DURUMU[m.durum] ?? { ad: m.durum }).ad}{m.surum_sayisi > 0 && ` · v${m.surum_sayisi}`}
-                  {m.kalite === 'kusurlu' && <span className="ml-1 px-1 rounded bg-amber-100 text-amber-800">kusurlu</span>}
-                </span>
-              </button>
-            ))}
-          </div>
-          <div className="px-4 sm:px-5 py-2.5 border-t border-paper-200 flex items-center justify-between text-stone-600">
-            <span>{liste.toplam.toLocaleString('tr-TR')} sonuç</span>
-            <span className="flex items-center gap-2">
-              <button type="button" disabled={sayfa <= 1} onClick={() => setSayfa((s) => s - 1)} className="px-2 py-1 rounded border border-paper-300 disabled:opacity-40 cursor-pointer">Önceki</button>
-              {sayfa} / {sayfaSayisi}
-              <button type="button" disabled={sayfa >= sayfaSayisi} onClick={() => setSayfa((s) => s + 1)} className="px-2 py-1 rounded border border-paper-300 disabled:opacity-40 cursor-pointer">Sonraki</button>
-            </span>
-          </div>
-        </>
+              ))}
+            </button>
+          ))}
+        </div>
       )}
+      {kip === 'ad' && liste && (
+        <div className="divide-y divide-paper-200">
+          {liste.satirlar.length === 0 && <p className="px-5 py-4 text-stone-500">Sonuç yok.</p>}
+          {liste.satirlar.map((m) => (
+            <button key={m.anahtar} type="button" onClick={() => onSec(m.anahtar)}
+              className="w-full text-left px-4 sm:px-5 py-2.5 hover:bg-paper-100 cursor-pointer flex flex-col sm:flex-row sm:items-start justify-between gap-1">
+              <span className="text-stone-800 min-w-0">
+                <span className="font-medium">{m.ad}</span>
+                <span className="block text-stone-500">
+                  {m.tur_adi} · RG {tarihSaat(m.rg_tarihi)}{m.rg_sayisi ? ` / ${m.rg_sayisi}` : ''} · {m.anahtar}
+                  {m.mulga && ' · mülga'}{m.kalkti && ` · siteden kalktı (${tarihSaat(m.kalkti)})`}
+                </span>
+                {(m.konular ?? []).length > 0 && (
+                  <span className="flex flex-wrap gap-1 mt-0.5">
+                    {m.konular?.map((k) => <span key={k} className="px-1.5 rounded bg-petrol/10 text-petrol">{k}</span>)}
+                  </span>
+                )}
+              </span>
+              <span className={`shrink-0 ${(METIN_DURUMU[m.durum] ?? METIN_DURUMU.HATA).renk}`}>
+                {(METIN_DURUMU[m.durum] ?? { ad: m.durum }).ad}{m.surum_sayisi > 0 && ` · v${m.surum_sayisi}`}
+                {m.kalite === 'kusurlu' && <span className="ml-1 px-1 rounded bg-amber-100 text-amber-800">kusurlu</span>}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="px-4 sm:px-5 py-2.5 border-t border-paper-200 flex items-center justify-between text-stone-600">
+        <span>{toplam.toLocaleString('tr-TR')} sonuç</span>
+        <span className="flex items-center gap-2">
+          <button type="button" disabled={sayfa <= 1} onClick={() => setSayfa((s) => s - 1)} className="px-2 py-1 rounded border border-paper-300 disabled:opacity-40 cursor-pointer">Önceki</button>
+          {sayfa} / {sayfaSayisi}
+          <button type="button" disabled={sayfa >= sayfaSayisi} onClick={() => setSayfa((s) => s + 1)} className="px-2 py-1 rounded border border-paper-300 disabled:opacity-40 cursor-pointer">Sonraki</button>
+        </span>
+      </div>
     </div>
   );
 };

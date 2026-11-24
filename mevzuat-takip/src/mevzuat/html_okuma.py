@@ -87,97 +87,111 @@ class _Kurucu:
         self.metin.append(f"[Resim {i + 1}]")
 
 
+_TABLO_ICI = {"tr", "td", "th", "tbody", "thead", "tfoot"}
+
+
+# Biçim etiketinin görünümdeki karşılığı (kalın, eğik, altı çizili, üst/alt simge) ya da None.
+def _sarma_etiketi(dugum) -> str | None:
+    etiket = dugum.tag
+    if etiket in _KALIN:
+        return "b"
+    if etiket in _EGIK and "font-style:normal" not in (dugum.attributes.get("style") or "").lower().replace(" ", ""):
+        return "i"
+    return etiket if etiket in ("u", "sup", "sub") else None
+
+
+# Blok etiket (p, div, başlık, liste, tablo hücresi): yeni paragraf açar, içini yazar, kapatır.
+def _blok(dugum, k: _Kurucu) -> None:
+    k.bosalt()
+    if dugum.tag in _BASLIK_SEVIYE:
+        k.p_etiket = _BASLIK_SEVIYE[dugum.tag]
+    elif dugum.tag == "li":
+        k.p_sinif = "madde-isareti"
+    if hiza := _hizalama(dugum):
+        k.p_sinif = (k.p_sinif + " " + hiza).strip()
+    _satir_ici(dugum, k)
+    k.bosalt()
+
+
+# Satır içi etiket (span, b, i, a, font ...): içi aynı paragrafa yazılır, biçimliyse sarılır, bağlantı kaydedilir.
+def _satir_ici_etiket(dugum, k: _Kurucu) -> None:
+    if dugum.tag == "a" and (href := (dugum.attributes.get("href") or "").strip()):
+        k.baglantilar.append((href, " ".join((dugum.text() or "").split())))
+    sar = _sarma_etiketi(dugum)
+    if sar:
+        k.p_html.append(f"<{sar}>")
+    _satir_ici(dugum, k)
+    if sar:
+        k.p_html.append(f"</{sar}>")
+
+
 def _satir_ici(dugum, k: _Kurucu) -> None:
     """Bir düğümün içini paragraf içine yazar, blok etiket görürse paragrafı bölür."""
     for cocuk in dugum.iter(include_text=True):
         etiket = cocuk.tag
         if etiket == "-text":
             k.yazi(cocuk.text_content or "")
+        elif etiket in _ATILAN or etiket == "-comment":
             continue
-        if etiket in _ATILAN or etiket == "-comment":
-            continue
-        if etiket == "br":
+        elif etiket == "br":
             k.p_html.append("<br>")
             k.p_metin.append(" ")
-            continue
-        if etiket == "img":
+        elif etiket == "img":
             src = (cocuk.attributes.get("src") or "").strip()
             if src and not src.startswith("data:"):
                 k.resim(src)
-            continue
-        if etiket == "table":
+        elif etiket == "table":
             k.bosalt()
             _tablo(cocuk, k)
-            continue
-        if etiket in _BLOK or etiket in ("tr", "td", "th", "tbody", "thead", "tfoot"):
+        elif etiket in _BLOK or etiket in _TABLO_ICI:
+            _blok(cocuk, k)
+        elif etiket == "hr":
             k.bosalt()
-            if etiket in _BASLIK_SEVIYE:
-                k.p_etiket = _BASLIK_SEVIYE[etiket]
-            elif etiket == "li":
-                k.p_sinif = "madde-isareti"
-            if hiza := _hizalama(cocuk):
-                k.p_sinif = (k.p_sinif + " " + hiza).strip()
-            _satir_ici(cocuk, k)
-            k.bosalt()
-            continue
-        if etiket == "hr":
-            k.bosalt()
-            continue
-        stil = (cocuk.attributes.get("style") or "").lower().replace(" ", "")
-        sar = None
-        if etiket in _KALIN:
-            sar = "b"
-        elif etiket in _EGIK and "font-style:normal" not in stil:
-            sar = "i"
-        elif etiket in ("u", "sup", "sub"):
-            sar = etiket
-        if etiket == "a":
-            href = (cocuk.attributes.get("href") or "").strip()
-            if href:
-                k.baglantilar.append((href, " ".join((cocuk.text() or "").split())))
-        if sar:
-            k.p_html.append(f"<{sar}>")
-            _satir_ici(cocuk, k)
-            k.p_html.append(f"</{sar}>")
         else:
-            _satir_ici(cocuk, k)
+            _satir_ici_etiket(cocuk, k)
+
+
+# Tablonun kendi satırları (iç içe tablonun satırları dıştaki tabloya sayılmaz).
+def _kendi_satirlari(tablo) -> list:
+    satirlar = []
+    for tr in tablo.css("tr"):
+        ata = tr.parent
+        while ata is not None and ata.tag != "table":
+            ata = ata.parent
+        if ata is not None and ata.mem_id == tablo.mem_id:
+            satirlar.append(tr)
+    return satirlar
+
+
+def _resim_numaralarini_kaydir(metin: str, kayma: int, desen: str, bicim: str) -> str:
+    return re.sub(desen, lambda m: bicim.format(int(m.group(1)) + kayma), metin)
+
+
+def _hucre_oku(hucre, k: _Kurucu) -> tuple[str, str, str, str]:
+    """(etiket, colspan/rowspan öznitelikleri, görünüm, metin). Hücredeki resimler ve bağlantılar ana listeye taşınır,
+    resim numaraları ana listedeki yerlerine göre kaydırılır."""
+    ic = _Kurucu()
+    _satir_ici(hucre, ic)
+    ic.bosalt()
+    kayma = len(k.resimler)
+    gorunum = "<br>".join(re.sub(r"^<p[^>]*>|</p>$", "", g) for g in ic.gorunum)
+    gorunum = _resim_numaralarini_kaydir(gorunum, kayma, r'data-resim="(\d+)"', 'data-resim="{}"')
+    gorunum = re.sub(r"</?(?:h\d|figure)[^>]*>", "", gorunum)
+    metin = " ".join(_resim_numaralarini_kaydir(t, kayma, r"\[Resim (\d+)\]", "[Resim {}]") for t in ic.metin)
+    k.resimler.extend(ic.resimler)
+    k.baglantilar.extend(ic.baglantilar)
+    oz = ""
+    for ad in ("colspan", "rowspan"):
+        deger = (hucre.attributes.get(ad) or "").strip()
+        if deger.isdigit() and 1 < int(deger) <= 1000:
+            oz += f' {ad}="{int(deger)}"'
+    return hucre.tag, oz, gorunum, metin
 
 
 def _tablo(tablo, k: _Kurucu) -> None:
     """Tabloyu yapısıyla görünüme, satır satır ("hücre | hücre") metne yazar. İç içe tablo hücrenin metnine katılır."""
-    satirlar = []
-    for tr in tablo.css("tr"):
-        # İç içe tablonun satırları dıştaki tabloya sayılmasın.
-        ata = tr.parent
-        while ata is not None and ata.tag != "table":
-            ata = ata.parent
-        if ata is None or ata.mem_id != tablo.mem_id:
-            continue
-        hucreler = []
-        for hucre in tr.iter():
-            if hucre.tag not in ("td", "th"):
-                continue
-            ic = _Kurucu()
-            _satir_ici(hucre, ic)
-            ic.bosalt()
-            k.resimler_baslangic = None
-            # Hücredeki resimler ana listeye taşınır, numaraları kaydırılır.
-            kayma = len(k.resimler)
-            gorunum = "<br>".join(re.sub(r"^<p[^>]*>|</p>$", "", g) for g in ic.gorunum)
-            gorunum = re.sub(r'data-resim="(\d+)"', lambda m: f'data-resim="{int(m.group(1)) + kayma}"', gorunum)
-            gorunum = re.sub(r"</?(?:h\d|figure)[^>]*>", "", gorunum)
-            k.resimler.extend(ic.resimler)
-            k.baglantilar.extend(ic.baglantilar)
-            metin = " ".join(re.sub(r"\[Resim (\d+)\]", lambda m: f"[Resim {int(m.group(1)) + kayma}]", t)
-                             for t in ic.metin)
-            oz = ""
-            for ad in ("colspan", "rowspan"):
-                deger = (hucre.attributes.get(ad) or "").strip()
-                if deger.isdigit() and 1 < int(deger) <= 1000:
-                    oz += f' {ad}="{int(deger)}"'
-            hucreler.append((hucre.tag, oz, gorunum, metin))
-        if hucreler:
-            satirlar.append(hucreler)
+    satirlar = [hucreler for tr in _kendi_satirlari(tablo)
+                if (hucreler := [_hucre_oku(h, k) for h in tr.iter() if h.tag in ("td", "th")])]
     if not satirlar:
         return
     k.tablo_sayisi += 1

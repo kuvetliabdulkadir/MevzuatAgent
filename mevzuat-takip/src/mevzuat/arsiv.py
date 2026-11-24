@@ -47,7 +47,7 @@ from sqlalchemy.orm import Session
 
 from mevzuat import arsiv_cekim, arsiv_fark, html_okuma
 from mevzuat.arsiv_cekim import Gunluk
-from mevzuat.db import ArsivDosyasi, ArsivIstegi, ArsivMevzuat, ArsivSurumu, IzlenenMevzuat, Kullanici
+from mevzuat.db import ArsivDosyasi, ArsivIstegi, ArsivKonu, ArsivMevzuat, ArsivSurumu, IzlenenMevzuat, Kullanici
 from mevzuat.filtre import tr_kucuk
 from mevzuat.http import TEKRAR_DENENEBILIR, make_client
 from mevzuat.sources import mevzuat_gov
@@ -144,6 +144,8 @@ class Istemci:
         self.gunluk = gunluk
         self.ek_bekleme = 0.0
         self.basari = 0
+        # Alan adı çözülemeyen siteler (kapanmış eski adresler); iş boyunca bir daha denenmez (arsiv_cekim.dosya_indir).
+        self.olu_alanlar: set[str] = set()
 
     # Bir önceki istekten bu yana yeterince zaman geçmediyse bekle.
     def _bekle(self) -> None:
@@ -249,23 +251,29 @@ def tur_listesi(ist: Istemci, tur: str,
         except ListeAlinamadi as e:
             return satirlar, toplam, str(e)
         ilerle(len(satirlar), toplam)
-    # Mülga listesi tutarsız: sayaç 185 derken bazı sayfalar eksik geliyor (20.11.2026: 168, 87). Tekil sayı toplamdan
-    # azsa liste farklı sayfa boylarıyla yeniden alınır, anahtara göre birleştirilir (plan, Faz 1 madde 2).
     if tur == MULGA and toplam:
-        gorulen = {_kunye(d)["anahtar"] for d in satirlar}
-        for boy in TELAFI_SAYFA_BOYLARI:
-            if len(gorulen) >= toplam:
-                break
-            for baslangic in range(0, toplam, boy):
-                try:
-                    for d in ist.liste_sayfasi(tur, baslangic, boy)["data"]:
-                        if (a := _kunye(d)["anahtar"]) not in gorulen:
-                            gorulen.add(a)
-                            satirlar.append(d)
-                except ListeAlinamadi:
-                    break
-            log.info("Mülga listesi telafisi (%d'lik sayfa): %d/%d tekil kayıt", boy, len(gorulen), toplam)
+        _mulga_telafisi(ist, satirlar, toplam)
     return satirlar, toplam, None
+
+
+# Mülga listesi tutarsız: sayaç 185 derken bazı sayfalar eksik geliyor (20.11.2026: 168, 87). Tekil sayı toplamdan
+# azsa liste farklı sayfa boylarıyla yeniden alınır, anahtara göre birleştirilir (plan, Faz 1 madde 2). `satirlar` yerinde
+# büyür. 2026-11-23 sunucu ölçümü: 50, 25, 10'luk sayfalarla da 168 tekil, site kalan 17'yi hiç listelemiyor.
+def _mulga_telafisi(ist: "Istemci", satirlar: list[dict], toplam: int) -> None:
+    gorulen = {_kunye(d)["anahtar"] for d in satirlar}
+    for boy in TELAFI_SAYFA_BOYLARI:
+        if len(gorulen) >= toplam:
+            return
+        for baslangic in range(0, toplam, boy):
+            try:
+                yeni = ist.liste_sayfasi(MULGA, baslangic, boy)["data"]
+            except ListeAlinamadi:
+                break
+            for d in yeni:
+                if (a := _kunye(d)["anahtar"]) not in gorulen:
+                    gorulen.add(a)
+                    satirlar.append(d)
+        log.info("Mülga listesi telafisi (%d'lik sayfa): %d/%d tekil kayıt", boy, len(gorulen), toplam)
 
 
 # Servis satırından künye alanları.
@@ -387,6 +395,166 @@ def gunluk_ozeti(yol: Path) -> dict:
     return sonuc
 
 
+def _yeni_ilerleme(turler: list[str], yeniden: bool, gunluk: Gunluk) -> dict:
+    return {"asama": "liste", "turler": turler, "yeniden": yeniden, "liste": {},
+            "metin": {"toplam": 0, "biten": 0, "yeni_surum": 0, "okuma_duzeltmesi": 0, "ayni": 0,
+                      "hata": 0, "sitede_yok": 0, "ocr_gerekli": 0, "kusurlu": 0},
+            "gunluk": gunluk.yol.name if gunluk.yol else None}
+
+
+class ArsivIsi:
+    """Bir arşiv işi: liste aşaması, metin aşaması, ilerleme kaydı ve durdurma. arsivi_olustur bunu çalıştırır."""
+
+    def __init__(self, session: Session, klasor: Path, istek_id: int | None, turler: list[str], yeniden: bool,
+                 anahtarlar: list[str] | None, esik: datetime, uyu: Callable[[float], None], saat: Callable[[], datetime]):
+        self.session, self.klasor, self.istek_id = session, klasor, istek_id
+        self.turler, self.yeniden, self.anahtarlar, self.esik = turler, yeniden, anahtarlar, esik
+        self.uyu, self.saat = uyu, saat
+        self.gunluk = Gunluk(gunluk_yolu(klasor, istek_id, saat()))
+        self.ilerleme = _yeni_ilerleme(turler, yeniden, self.gunluk)
+        self.ist: Istemci | None = None
+        self.eksik_listeler: list[str] = []
+
+    # İlerlemeyi isteğe yazar, panelden durdur denildiyse Durduruldu fırlatır.
+    def kaydet_ve_bak(self) -> None:
+        self.ilerleme["guncellendi"] = self.saat().isoformat(timespec="seconds")
+        self.ilerleme["istek_araligi"] = round(ISTEK_ARASI_BEKLEME + self.ist.ek_bekleme, 1) if self.ist else None
+        if self.istek_id is None:
+            return
+        self.session.execute(update(ArsivIstegi).where(ArsivIstegi.id == self.istek_id)
+                             .values(ilerleme=dict(self.ilerleme)))
+        self.session.commit()
+        if self.session.scalar(select(ArsivIstegi.durum).where(ArsivIstegi.id == self.istek_id)) == "DURDURULUYOR":
+            raise Durduruldu()
+
+    def bitir(self, durum: str, hata: str | None = None) -> str:
+        self.ilerleme["asama"] = "bitti"
+        self.ilerleme["guncellendi"] = self.saat().isoformat(timespec="seconds")
+        self.gunluk.yaz({"ozet": True, "durum": durum, "hata": hata, "metin": self.ilerleme["metin"],
+                         "bitti": self.saat().isoformat(timespec="seconds")})
+        if self.istek_id is not None:
+            self.session.rollback()
+            self.session.execute(update(ArsivIstegi).where(ArsivIstegi.id == self.istek_id).values(
+                durum=durum, bitti=self.saat(), ilerleme=dict(self.ilerleme), hata=hata))
+            self.session.commit()
+        log.info("Arşiv işi bitti: %s %s", durum, self.ilerleme["metin"])
+        return durum
+
+    # 1. Liste: her tür baştan sona alınır, yeni/geri gelen/kalkan işlenir (deneme çalıştırmasında atlanır).
+    def liste_asamasi(self) -> None:
+        calisma_basi = self.saat()
+        for tur in ([] if self.anahtarlar else self.turler):
+            self.ilerleme["tur"] = tur
+            self.ilerleme["liste"][tur] = {"alinan": 0, "toplam": None}
+
+            def ilerle(alinan: int, toplam: int, tur=tur) -> None:
+                self.ilerleme["liste"][tur] = {"alinan": alinan, "toplam": toplam}
+                if alinan % (SAYFA_BOYU * 10) == 0:
+                    self.kaydet_ve_bak()
+
+            satirlar, toplam, eksik = tur_listesi(self.ist, tur, ilerle)
+            # Eksik listede kalktı kontrolü yapılmaz (toplam 0 verilir), son sayfa eksik kalsa bile yanlış "kalktı" olmasın.
+            sayac = listeyi_isle(self.session, tur, satirlar, 0 if eksik else toplam, self.saat(), calisma_basi)
+            self.ilerleme["liste"][tur].update(sayac, alinan=len(satirlar), toplam=toplam or None)
+            if eksik:
+                self.ilerleme["liste"][tur]["eksik"] = eksik
+                self.eksik_listeler.append(eksik)
+                log.warning("Liste %s eksik kaldı, iş devam ediyor: %s", tur, eksik)
+            log.info("Liste %s: %d/%d kayıt, %s", tur, len(satirlar), toplam, sayac)
+            self.kaydet_ve_bak()
+
+    # Yeni sürümde arama dizini ve konu filtresi o mevzuat için hemen güncellenir (Faz 2, 3).
+    def _dizin_ve_filtre(self, anahtar: str, konular: list) -> None:
+        from mevzuat import arama
+        self.session.commit()
+        try:
+            arama.dizini_guncelle(self.session, anahtar)
+            arama.konulari_uygula(self.session, konular, anahtar=anahtar, simdi=self.saat())
+        except Exception as e:  # dizin/filtre hatası mevzuatın kendisini düşürmesin
+            self.session.rollback()
+            log.warning("Arama dizini/konu filtresi güncellenemedi (%s): %r", anahtar, e)
+
+    # Bir mevzuatı çeker. Başarılıysa True; hata mevzuata yazılır, iş devam eder.
+    def _mevzuati_isle(self, anahtar: str, konular: list) -> bool:
+        m = self.session.get(ArsivMevzuat, anahtar)
+        self.ilerleme["son"] = {"anahtar": anahtar, "ad": m.ad[:120]}
+        sayac = self.ilerleme["metin"]
+        try:
+            sonuc = arsiv_cekim.mevzuati_cek(self.session, self.ist, m, self.klasor, self.saat(), self.gunluk,
+                                             metin_adresi)
+        except Exception as e:
+            self.session.rollback()
+            m = self.session.get(ArsivMevzuat, anahtar)
+            m.durum, m.deneme, m.son_hata = "HATA", m.deneme + 1, repr(e)[:1000]
+            sayac["hata"] += 1
+            log.warning("Arşiv metni alınamadı: %s (%s): %r", m.ad[:80], anahtar, e)
+            return False
+        if sonuc in ("yeni", "okuma_duzeltmesi"):
+            self._dizin_ve_filtre(anahtar, konular)
+        alan = "yeni_surum" if sonuc == "yeni" else sonuc
+        sayac[alan] = sayac.get(alan, 0) + 1
+        sayac["ocr_gerekli"] += m.durum == "OCR_GEREKLI"
+        sayac["kusurlu"] += m.kalite == "kusurlu" and sonuc != "sitede_yok"
+        return True
+
+    # Site üst üste hata veriyorsa beklenir; çok tekrar ederse iş durur.
+    def _hata_beklemesi(self, beklemeler: int) -> None:
+        if beklemeler > EN_FAZLA_HATA_BEKLEMESI:
+            raise SiteCevapVermiyor(
+                f"Site üst üste {UST_USTE_HATA} mevzuatta hata verdi, {EN_FAZLA_HATA_BEKLEMESI} kez beklendi. "
+                "Daha sonra yeniden başlatın, kaldığı yerden devam eder.")
+        log.warning("Üst üste %d hata, %d sn bekleniyor", UST_USTE_HATA, HATA_BEKLEMESI)
+        self.kaydet_ve_bak()
+        self.uyu(HATA_BEKLEMESI)
+
+    # 2. Metin: kuyruktaki her mevzuat çekilir, okunur, sürümlenir.
+    def metin_asamasi(self) -> None:
+        from mevzuat.tanimlar import konulari_oku
+        self.ilerleme["asama"], self.ilerleme["tur"] = "metin", None
+        sira = kuyruk(self.session, self.turler, self.yeniden, self.esik, self.anahtarlar)
+        self.ilerleme["metin"]["toplam"] = len(sira)
+        self.kaydet_ve_bak()
+        try:
+            konular = konulari_oku(self.session)
+        except Exception:
+            konular = []
+        ust_uste, beklemeler = 0, 0
+        for i, anahtar in enumerate(sira, 1):
+            ust_uste = 0 if self._mevzuati_isle(anahtar, konular) else ust_uste + 1
+            self.session.commit()
+            self.ilerleme["metin"]["biten"] = i
+            if ust_uste >= UST_USTE_HATA:
+                beklemeler += 1
+                self._hata_beklemesi(beklemeler)
+                ust_uste = 0
+            if i % ILERLEME_ARALIGI == 0:
+                self.kaydet_ve_bak()
+
+    def calistir(self, client: httpx.Client | None) -> str:
+        kilit = FileLock(str(self.klasor / "arsiv.lock"), timeout=0)
+        try:
+            kilit.acquire()
+        except Timeout:
+            return self.bitir("HATALI", "Başka bir arşiv işi sürüyor (arsiv.lock kilitli).")
+        try:
+            self.ist = Istemci(client or make_client(zaman_asimi=300.0, en_fazla_bayt=ARSIV_EN_FAZLA_BAYT),
+                               uyu=self.uyu, gunluk=self.gunluk)
+            self.liste_asamasi()
+            self.metin_asamasi()
+            # İş bitti ama bazı listeler eksik kaldıysa panelde görünsün, yeniden başlatınca tamamlanır.
+            if self.eksik_listeler:
+                return self.bitir("BITTI", "Bazı listeler site cevap vermediği için eksik kaldı, gelenlerin metni alındı. "
+                                           "Yeniden başlatın, eksikler tamamlanır. " + " | ".join(self.eksik_listeler))
+            return self.bitir("BITTI")
+        except Durduruldu:
+            return self.bitir("DURDURULDU")
+        except Exception as e:
+            log.exception("Arşiv işi hata verdi")
+            return self.bitir("HATALI", f"{e}"[:2000] or repr(e)[:2000])
+        finally:
+            kilit.release()
+
+
 # Arşiv işinin kendisi. Son durumu döner, BITTI, DURDURULDU ya da HATALI.
 def arsivi_olustur(
     engine: Engine,
@@ -399,137 +567,21 @@ def arsivi_olustur(
     klasor: Path | None = None,
     anahtarlar: list[str] | None = None,
 ) -> str:
-    """`anahtarlar` verilirse liste adımı atlanır, sadece onlar (arşivde olmaları gerekir) baştan çekilir (deneme seti)."""
+    """Seçenekler panelden gelen istekte yazılıysa oradan okunur. `anahtarlar` verilirse liste adımı atlanır, sadece
+    onlar (arşivde olmaları gerekir) baştan çekilir (deneme seti)."""
     klasor = klasor or arsiv_klasoru()
     klasor.mkdir(parents=True, exist_ok=True)
     with Session(engine) as session:
         istek = session.get(ArsivIstegi, istek_id) if istek_id else None
+        esik = saat()
         if istek is not None:
             turler = istek.secenekler.get("turler") or turler
             yeniden = bool(istek.secenekler.get("yeniden", yeniden))
             anahtarlar = istek.secenekler.get("anahtarlar") or anahtarlar
+            # Yarım kalıp kendiliğinden devam ettirilen iş ilk işin eşiğini taşır; yoksa "yeniden" her şeyi baştan alırdı.
+            esik = datetime.fromisoformat(istek.secenekler["esik"]) if istek.secenekler.get("esik") else istek.istendi
         turler = [t for t in TURLER if t in (turler or TURLER)]
-        # Yarım kalıp kendiliğinden devam ettirilen iş ilk işin eşiğini taşır; yoksa "yeniden" her şeyi baştan alırdı.
-        esik = saat()
-        if istek is not None:
-            esik = istek.istendi
-            if devam_esigi := istek.secenekler.get("esik"):
-                esik = datetime.fromisoformat(devam_esigi)
-        gunluk = Gunluk(gunluk_yolu(klasor, istek_id, saat()))
-        ilerleme: dict = {"asama": "liste", "turler": turler, "yeniden": yeniden, "liste": {},
-                          "metin": {"toplam": 0, "biten": 0, "yeni_surum": 0, "okuma_duzeltmesi": 0, "ayni": 0,
-                                    "hata": 0, "sitede_yok": 0, "ocr_gerekli": 0, "kusurlu": 0},
-                          "gunluk": gunluk.yol.name if gunluk.yol else None}
-        ist: Istemci | None = None
-
-        # İlerlemeyi isteğe yazar, panelden durdur denildiyse Durduruldu fırlatır.
-        def kaydet_ve_bak() -> None:
-            ilerleme["guncellendi"] = saat().isoformat(timespec="seconds")
-            ilerleme["istek_araligi"] = round(ISTEK_ARASI_BEKLEME + ist.ek_bekleme, 1) if ist else None
-            if istek_id is None:
-                return
-            session.execute(update(ArsivIstegi).where(ArsivIstegi.id == istek_id).values(ilerleme=dict(ilerleme)))
-            session.commit()
-            if session.scalar(select(ArsivIstegi.durum).where(ArsivIstegi.id == istek_id)) == "DURDURULUYOR":
-                raise Durduruldu()
-
-        def bitir(durum: str, hata: str | None = None) -> str:
-            ilerleme["asama"] = "bitti"
-            ilerleme["guncellendi"] = saat().isoformat(timespec="seconds")
-            gunluk.yaz({"ozet": True, "durum": durum, "hata": hata, "metin": ilerleme["metin"],
-                        "bitti": saat().isoformat(timespec="seconds")})
-            if istek_id is not None:
-                session.rollback()
-                session.execute(update(ArsivIstegi).where(ArsivIstegi.id == istek_id).values(
-                    durum=durum, bitti=saat(), ilerleme=dict(ilerleme), hata=hata))
-                session.commit()
-            log.info("Arşiv işi bitti: %s %s", durum, ilerleme["metin"])
-            return durum
-
-        kilit = FileLock(str(klasor / "arsiv.lock"), timeout=0)
-        try:
-            kilit.acquire()
-        except Timeout:
-            return bitir("HATALI", "Başka bir arşiv işi sürüyor (arsiv.lock kilitli).")
-        try:
-            ist = Istemci(client or make_client(zaman_asimi=300.0, en_fazla_bayt=ARSIV_EN_FAZLA_BAYT), uyu=uyu,
-                          gunluk=gunluk)
-            calisma_basi = saat()
-            eksik_listeler: list[str] = []
-            # 1. Liste (deneme çalıştırmasında atlanır).
-            for tur in ([] if anahtarlar else turler):
-                ilerleme["tur"] = tur
-                ilerleme["liste"][tur] = {"alinan": 0, "toplam": None}
-
-                def ilerle(alinan: int, toplam: int, tur=tur) -> None:
-                    ilerleme["liste"][tur] = {"alinan": alinan, "toplam": toplam}
-                    if alinan % (SAYFA_BOYU * 10) == 0:
-                        kaydet_ve_bak()
-
-                satirlar, toplam, eksik = tur_listesi(ist, tur, ilerle)
-                # Eksik listede kalktı kontrolü yapılmaz (toplam 0 verilir), son sayfa eksik kalsa bile yanlış "kalktı" olmasın.
-                sayac = listeyi_isle(session, tur, satirlar, 0 if eksik else toplam, saat(), calisma_basi)
-                ilerleme["liste"][tur].update(sayac, alinan=len(satirlar), toplam=toplam or None)
-                if eksik:
-                    ilerleme["liste"][tur]["eksik"] = eksik
-                    eksik_listeler.append(eksik)
-                    log.warning("Liste %s eksik kaldı, iş devam ediyor: %s", tur, eksik)
-                log.info("Liste %s: %d/%d kayıt, %s", tur, len(satirlar), toplam, sayac)
-                kaydet_ve_bak()
-
-            # 2. Metin.
-            ilerleme["asama"], ilerleme["tur"] = "metin", None
-            sira = kuyruk(session, turler, yeniden, esik, anahtarlar)
-            ilerleme["metin"]["toplam"] = len(sira)
-            kaydet_ve_bak()
-            ust_uste, beklemeler = 0, 0
-            for i, anahtar in enumerate(sira, 1):
-                m = session.get(ArsivMevzuat, anahtar)
-                ilerleme["son"] = {"anahtar": anahtar, "ad": m.ad[:120]}
-                try:
-                    sonuc = arsiv_cekim.mevzuati_cek(session, ist, m, klasor, saat(), gunluk, metin_adresi)
-                    sayac = ilerleme["metin"]
-                    alan = "yeni_surum" if sonuc == "yeni" else sonuc
-                    sayac[alan] = sayac.get(alan, 0) + 1
-                    if m.durum == "OCR_GEREKLI":
-                        sayac["ocr_gerekli"] += 1
-                    if m.kalite == "kusurlu" and sonuc != "sitede_yok":
-                        sayac["kusurlu"] += 1
-                    ust_uste = 0
-                except Exception as e:
-                    session.rollback()
-                    m = session.get(ArsivMevzuat, anahtar)
-                    m.durum, m.deneme, m.son_hata = "HATA", m.deneme + 1, repr(e)[:1000]
-                    ilerleme["metin"]["hata"] += 1
-                    ust_uste += 1
-                    log.warning("Arşiv metni alınamadı: %s (%s): %r", m.ad[:80], anahtar, e)
-                session.commit()
-                ilerleme["metin"]["biten"] = i
-                # Site üst üste hata veriyorsa bekle, çok tekrar ederse dur.
-                if ust_uste >= UST_USTE_HATA:
-                    beklemeler += 1
-                    if beklemeler > EN_FAZLA_HATA_BEKLEMESI:
-                        raise SiteCevapVermiyor(
-                            f"Site üst üste {UST_USTE_HATA} mevzuatta hata verdi, {EN_FAZLA_HATA_BEKLEMESI} kez beklendi. "
-                            "Daha sonra yeniden başlatın, kaldığı yerden devam eder.")
-                    log.warning("Üst üste %d hata, %d sn bekleniyor", ust_uste, HATA_BEKLEMESI)
-                    kaydet_ve_bak()
-                    uyu(HATA_BEKLEMESI)
-                    ust_uste = 0
-                if i % ILERLEME_ARALIGI == 0:
-                    kaydet_ve_bak()
-            # İş bitti ama bazı listeler eksik kaldıysa panelde görünsün, yeniden başlatınca tamamlanır.
-            if eksik_listeler:
-                return bitir("BITTI", "Bazı listeler site cevap vermediği için eksik kaldı, gelenlerin metni alındı. "
-                                      "Yeniden başlatın, eksikler tamamlanır. " + " | ".join(eksik_listeler))
-            return bitir("BITTI")
-        except Durduruldu:
-            return bitir("DURDURULDU")
-        except Exception as e:
-            log.exception("Arşiv işi hata verdi")
-            return bitir("HATALI", f"{e}"[:2000] or repr(e)[:2000])
-        finally:
-            kilit.release()
+        return ArsivIsi(session, klasor, istek_id, turler, yeniden, anahtarlar, esik, uyu, saat).calistir(client)
 
 
 # --- panel -----------------------------------------------------------------------------------------
@@ -635,8 +687,15 @@ def _tr_buyuk(metin: str) -> str:
 
 
 # Arşiv listesi, arama ve süzme ile, sayfa sayfa.
-def liste(session: Session, ara: str = "", tur: str = "", durum: str = "", sayfa: int = 1, boyut: int = 50) -> dict:
+def liste(session: Session, ara: str = "", tur: str = "", durum: str = "", sayfa: int = 1, boyut: int = 50,
+          konu: str = "") -> dict:
+    """`konu` verilirse sadece o konuyla ilgili olanlar; "*" ise herhangi bir konuyla ilgili olanlar (Faz 3)."""
     q = select(ArsivMevzuat)
+    if konu:
+        ilgili = select(ArsivKonu.anahtar).where(ArsivKonu.ilgili.is_(True))
+        if konu != "*":
+            ilgili = ilgili.where(ArsivKonu.konu == konu)
+        q = q.where(ArsivMevzuat.anahtar.in_(ilgili))
     if ara := ara.strip():
         q = q.where(or_(ArsivMevzuat.anahtar == ara, ArsivMevzuat.ad.contains(ara, autoescape=True),
                         ArsivMevzuat.ad.contains(_tr_buyuk(ara), autoescape=True),
@@ -655,7 +714,13 @@ def liste(session: Session, ara: str = "", tur: str = "", durum: str = "", sayfa
     sayfa, boyut = max(1, sayfa), min(max(1, boyut), 200)
     satirlar = session.scalars(q.order_by(ArsivMevzuat.rg_tarihi.desc().nulls_last(), ArsivMevzuat.anahtar)
                                .offset((sayfa - 1) * boyut).limit(boyut))
-    return {"toplam": toplam, "sayfa": sayfa, "boyut": boyut, "satirlar": [_kunye_json(m) for m in satirlar]}
+    satirlar = list(satirlar)
+    konulari = {}
+    for a, k in session.execute(select(ArsivKonu.anahtar, ArsivKonu.konu).where(
+            ArsivKonu.anahtar.in_([m.anahtar for m in satirlar]), ArsivKonu.ilgili.is_(True))):
+        konulari.setdefault(a, []).append(k)
+    return {"toplam": toplam, "sayfa": sayfa, "boyut": boyut,
+            "satirlar": [{**_kunye_json(m), "konular": sorted(konulari.get(m.anahtar, []))} for m in satirlar]}
 
 
 def _zaman(z: datetime | None) -> str | None:
@@ -712,7 +777,9 @@ def detay(session: Session, anahtar: str) -> dict | None:
     surumler = list(session.scalars(select(ArsivSurumu).where(ArsivSurumu.anahtar == anahtar)
                                     .order_by(ArsivSurumu.surum_no)))
     json_ler = [_surum_json(session, s, surumler[i - 1] if i else None) for i, s in enumerate(surumler)]
-    return {**_kunye_json(m), "surumler": list(reversed(json_ler))}
+    konular = [{"konu": k.konu, "kanit": k.kanit} for k in session.scalars(
+        select(ArsivKonu).where(ArsivKonu.anahtar == anahtar, ArsivKonu.ilgili.is_(True)).order_by(ArsivKonu.puan.desc()))]
+    return {**_kunye_json(m), "surumler": list(reversed(json_ler)), "konular": konular}
 
 
 def _surum(session: Session, anahtar: str, surum_no: int | None) -> ArsivSurumu | None:
