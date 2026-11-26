@@ -51,6 +51,8 @@ export interface Degisiklik {
   tur: string;
   eski: string;
   yeni: string;
+  cikan?: string[]; // bu parçada çıkarılan ifadeler (eski kayıtlarda yok)
+  giren?: string[]; // bu parçada eklenen ifadeler
 }
 
 // Rapordaki tek kalem (belge).
@@ -72,6 +74,7 @@ export interface Kalem {
   ocr: boolean;
   okunamadi: boolean;
   degisiklikler: Degisiklik[] | null;
+  degisiklik_ozeti?: string | null; // "Madde 6 değişti; Ek Madde 1 eklendi"
   kaynakca: string;
   url: string | null; // belgenin resmî adresi
   nedenler: { konu: string; aciklama: string }[]; // eşleşen konuların açıklamaları

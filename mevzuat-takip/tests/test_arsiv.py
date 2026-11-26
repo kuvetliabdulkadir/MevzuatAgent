@@ -309,6 +309,11 @@ def test_zamanlayici_arsiv_istegini_alir_ve_sonuclandirir(engine):
         istek = arsiv.istek_olustur(s, 1, None, False, zamanlayici_calisiyor=True)
         s.commit()
         istek_id = istek.id
+    # Açılışta kaçan günlük iş başladı: o sürerken arşiv işi başlamaz (ikisi aynı arşiv kilidini kullanıyor).
+    assert z.surec is not None
+    z.adim()
+    assert baslatilan == []
+    z.surec.returncode = 0
     z.adim()
     assert baslatilan == [istek_id]
     with Session(engine) as s:
@@ -332,6 +337,29 @@ def test_zamanlayici_arsiv_istegini_alir_ve_sonuclandirir(engine):
         assert eski.durum == "HATALI" and "kendiliğinden devam" in eski.hata
         assert yeni.durum == "BEKLIYOR" and yeni.secenekler == {
             "turler": ["Kanun"], "yeniden": True, "esik": "2026-11-20T09:00:00", "devam_eden": eski.id}
+
+
+def test_zamanlayici_haftalik_liste_isini_gece_siraya_koyar(engine):
+    with Session(engine) as s:
+        s.add(ArsivMevzuat(anahtar="1.5.1", tur="Kanun", ad="X", url="u", bicim="html", ilk_gorulme=datetime(2026, 11, 1),
+                           son_gorulme=datetime(2026, 11, 1), durum="TAMAM", surum_sayisi=1))
+        s.commit()
+    simdi = [datetime(2026, 11, 20, 12, 0)]
+    baslatilan = []
+    z = zm.Zamanlayici(engine, baslat=lambda i: SahteSurec(), saat=lambda: simdi[0], gecikme=lambda: 9 * 3600,
+                       arsiv_baslat=lambda i: baslatilan.append(i) or SahteSurec())
+    z.kur()
+    z.surec = None  # açılışta başlayan günlük iş bitmiş olsun
+    z.adim()
+    with Session(engine) as s:
+        assert s.scalar(select(ArsivIstegi)) is None  # gündüz açılmaz
+    simdi[0] = datetime(2026, 11, 21, 2, 0)
+    z.adim()
+    with Session(engine) as s:
+        istek = s.scalar(select(ArsivIstegi))
+        assert istek.secenekler.get("haftalik") and istek.isteyen_id is None
+    z.adim()
+    assert baslatilan == [istek.id]
 
 
 def _post(c, yol, veri=None):

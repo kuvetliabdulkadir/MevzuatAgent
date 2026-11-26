@@ -8,8 +8,9 @@ Zamanlayıcı 30 saniyede bir uyanır ve şunları yapar.
   2. Saatleri DB'den okur, değiştiyse sonraki hedefi yeniden hesaplar.
   3. Vakti geldiyse günlük işi ayrı bir süreç olarak başlatır, böylece iş çökse ya da bellek şişse de zamanlayıcı ayakta kalır.
   4. Panelden "Şimdi tara" isteği bekliyorsa ve tarama sürmüyorsa onu başlatır, bitince sonucu isteğe yazar.
-  5. Panelden "Arşivi oluştur" isteği bekliyorsa ve arşiv işi sürmüyorsa onu ayrı bir süreçte başlatır (arsiv.py).
-     Arşiv işi saatler sürer, günlük taramayla aynı anda çalışabilir.
+  5. Panelden "Arşivi oluştur" isteği bekliyorsa ve arşiv işi ile günlük iş sürmüyorsa onu ayrı bir süreçte başlatır
+     (arsiv.py). Arşiv işi saatler sürebilir; o sürerken başlayan günlük iş arşive dokunmaz, bakacaklarını sonraya bırakır.
+     Arşiv doluysa haftada bir, gece, liste yenileme işi de kendiliğinden sıraya girer (arsiv.haftalik_istek).
   6. Nabız yazar, panel bununla zamanlayıcının çalışıp çalışmadığını ve sonraki taramanın ne zaman olduğunu görür, tarama sürerken de.
 Planlı çalışmalara 0 ile 10 dakika arasında rastgele gecikme eklenir, devlet sitelerine tam dakikasında yüklenmemek için.
 
@@ -314,6 +315,8 @@ def filtre_baslat() -> subprocess.Popen:
 
 # Konular değişti mi / dizin eksik mi kontrolü bu aralıkla yapılır.
 FILTRE_KONTROL_ARALIGI = timedelta(minutes=5)
+# Haftalık arşiv liste yenilemesi gece bu saatlerde başlar (günlük taramalar 06:30 ve 18:00 civarı).
+HAFTALIK_SAATLER = range(1, 5)
 
 
 # Zamanlayıcının kendisi.
@@ -339,6 +342,7 @@ class Zamanlayici:
         self.filtre_baslat = filtre_baslat
         self.filtre_surec: subprocess.Popen | None = None
         self.filtre_kontrol: datetime | None = None
+        self.haftalik_kontrol: datetime | None = None
         # Şu an çalışan arşiv süreci ve isteği (yoksa None).
         self.arsiv_surec: subprocess.Popen | None = None
         self.arsiv_istek_id: int | None = None
@@ -423,9 +427,12 @@ class Zamanlayici:
                 log.info("Arşiv işi bitti (çıkış kodu %d)", self.arsiv_surec.returncode)
                 arsiv.istegi_sonuclandir(session, self.arsiv_istek_id, self.arsiv_surec.returncode, simdi)
                 self.arsiv_surec, self.arsiv_istek_id = None, None
-            # Arşiv işi sürmüyorsa bekleyen arşiv isteği var mı bak.
-            if self.arsiv_surec is None:
+            # Arşiv işi sürmüyorsa bekleyen arşiv isteği var mı bak. Günlük iş sürerken başlatılmaz: ikisi aynı arşiv
+            # kilidini (arsiv.lock) kullanıyor, günlük takip arşive yazarken başlayan arşiv işi hemen HATALI olurdu.
+            if self.arsiv_surec is None and self.surec is None:
                 self._arsiv_istegini_al(session, simdi)
+            # Haftada bir, gece, arşivin listesi yenilenir (yeni mevzuat v1 olur, kalkanlar işaretlenir, hatalılar denenir).
+            self._haftalik_listeyi_denetle(session, simdi)
             # Konular değiştiyse ya da arama dizini eksikse arşiv yeniden filtrelenir (arşiv işi sürmüyorken).
             self._filtreyi_denetle(session, simdi)
             # Son olarak nabız yaz.
@@ -479,6 +486,21 @@ class Zamanlayici:
             self.filtre_surec = self.filtre_baslat()
         except Exception:
             log.exception("Arşiv konu filtresi denetlenemedi")
+
+    # Haftalık liste yenilemesini sıraya koyar (arsiv.haftalik_istek): gece HAFTALIK_SAATLER içinde, başka iş yokken.
+    def _haftalik_listeyi_denetle(self, session: Session, simdi: datetime) -> None:
+        if self.arsiv_surec is not None or self.surec is not None or simdi.hour not in HAFTALIK_SAATLER:
+            return
+        if self.haftalik_kontrol is not None and simdi - self.haftalik_kontrol < FILTRE_KONTROL_ARALIGI:
+            return
+        self.haftalik_kontrol = simdi
+        try:
+            if istek := arsiv.haftalik_istek(session, simdi):
+                session.commit()
+                log.info("Haftalık arşiv liste yenilemesi sıraya kondu (istek #%d)", istek.id)
+        except Exception:
+            session.rollback()
+            log.exception("Haftalık arşiv liste yenilemesi sıraya konamadı")
 
     # Bekleyen arşiv isteğini alıp arşiv sürecini başlatır ("Şimdi tara" ile aynı yol).
     def _arsiv_istegini_al(self, session: Session, simdi: datetime) -> None:

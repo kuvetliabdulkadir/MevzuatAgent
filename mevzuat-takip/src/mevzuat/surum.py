@@ -7,12 +7,14 @@ Her çalışmada şu adımlar izlenir.
      mevzuatın adı konu filtresine takılırsa takibe alınır, bunlara "otomatik" denir.
      Bugün yayımlananlar atlanır, onları Resmî Gazete kaynağı zaten yakalıyor.
   2. Takip listesi config/izlenen_mevzuat.toml dosyasındakiler ("ayar") ve daha önce otomatik eklenenlerden oluşur.
-  3. Takipteki bir mevzuatın metni iki durumda çekilir. Bugün güncellenenler listesinde çıktıysa ya da son
-     kontrolden bu yana KONTROL_ARALIGI geçtiyse. Liste sadece bugünü gösterdiği için sunucunun kapalı kaldığı
-     günlerde kaçan güncellemeler en geç bu sürede yakalanır. Metinler büyük (ÖTV Kanunu yaklaşık 1 MB),
-     hepsini her gün çekmek siteye gereksiz yük olur.
-  4. İlk çekim taban (baseline) olur ve rapor üretmez. Sonrakilerde metnin SHA-256'sı değiştiyse yeni sürüm
-     saklanır ve farklar "Değişen mevzuat" kaydı olarak rapor ve onay akışına girer.
+  3. Metni arşive (arsiv.py) çekilenler: bugün güncellenenlerin hepsi, takipteki bir mevzuat da son kontrolden bu
+     yana KONTROL_ARALIGI geçtiyse. Liste sadece bugünü gösterdiği için sunucunun kapalı kaldığı günlerde kaçan
+     güncellemeler takiptekilerde en geç bu sürede yakalanır. Çekim arşiv işiyle aynı (arsiv_cekim.mevzuati_cek):
+     metin, resimler, ekler, sitenin PDF'i; değiştiyse arşive yeni sürüm yazılır, arama dizini ve konu filtresi güncellenir.
+  4. Arşiv taban. Arşivdeki son sürüm v1 ise yeni hal v2 olur ve v1↔v2 farkı "Değişen mevzuat" kaydı olarak rapor ve
+     onay akışına girer, sonra v2↔v3. Arşivde olmayan mevzuat açılır, ilk sürümü rapor üretmez. Sitenin kaynağı aynı
+     kalıp okuma iyileştiyse (okuma düzeltmesi) rapor yok. Takipte olmayan mevzuatın değişikliği adı ya da değişen
+     maddeleri bir konuya uyuyorsa rapora girer. Eski metin_surumleri tablosu yeni veri almaz, eski satırlar kanıt olarak durur.
 
 Örnek bir config/izlenen_mevzuat.toml kaydı aşağıda.
     [[mevzuat]]
@@ -32,10 +34,12 @@ import logging
 import re
 import time
 import tomllib
+
 # asdict, dataclass nesnesini sözlüğe çevirir (veritabanına JSON olarak yazmak için).
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
+
 # parse_qs adresteki parametre kısmını sözlüğe çevirir.
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -44,7 +48,14 @@ from selectolax.lexbor import LexborHTMLParser as HTMLParser
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mevzuat.db import Calisma, IzlenenMevzuat, Kayit, MetinSurumu
+from mevzuat.db import (
+    ArsivMevzuat,
+    ArsivSurumu,
+    Calisma,
+    IzlenenMevzuat,
+    Kayit,
+    SistemAyari,
+)
 from mevzuat.filtre import Konu, eslesmeler, is_kollari
 from mevzuat.icerik import html_metni
 
@@ -64,10 +75,14 @@ YENI_YAYIN_SURESI = timedelta(days=30)
 ISTEK_ARASI_BEKLEME = 1.0
 # Site bazı isteklerde listesi boş bir ana sayfa veriyor (08.10.2026, 8 istekten 1'i). Boş gelirse bu kadar kez tekrar istenir.
 LISTE_DENEME = 3
-# Rapordaki bir farkın en fazla kaç karakteri gösterilir (tamamı panelde/metinde).
-PARCA_UZUNLUGU = 400
-# Bir maddede en fazla 4 fark parçası gösterilir.
-BOLUM_BASINA_FARK = 4
+# Rapordaki bir fark parçasının en fazla kaç karakteri gösterilir (tamamı arşivde, panelde).
+PARCA_UZUNLUGU = 1200
+# Eklenen ya da kaldırılan maddenin en fazla kaç karakteri gösterilir.
+MADDE_UZUNLUGU = 3000
+# Bir maddede en fazla bu kadar fark parçası gösterilir, fazlası "… N değişiklik daha" satırı olur.
+BOLUM_BASINA_FARK = 12
+# Çıkarılan/eklenen ifade listesinde bir ifadenin en fazla uzunluğu.
+IFADE_UZUNLUGU = 300
 
 
 # --- ayar ----------------------------------------------------------------------------------------
@@ -125,6 +140,8 @@ class Guncellenen:
     # Mevzuatın ilk yayımlandığı Resmî Gazete tarihi.
     rg_tarihi: date | None
     sadece_pdf: bool = False  # bazı Cumhurbaşkanı kararlarının HTML metni yok (sayfa boş geliyor)
+    # Listedeki bağlantı (arşivde olmayan mevzuat bu adresle açılır).
+    href: str = ""
 
 
 # Listedeki linkten "tür.tertip.no" kimliğini çıkarır (iki farklı link biçimi var).
@@ -164,6 +181,7 @@ def parse_guncellenenler(sayfa: str) -> list[Guncellenen]:
             ad=" ".join(link.text().split()),
             rg_tarihi=datetime.strptime(tarih.group(1), "%d.%m.%Y").date() if tarih else None,
             sadece_pdf="/MevzuatMetin/" in link.attributes.get("href", ""),
+            href=link.attributes.get("href", ""),
         ))
     return sonuc
 
@@ -254,24 +272,32 @@ def bolumler(metin: str) -> dict[str, str]:
     return sonuc
 
 
-# Tek bir fark, hangi madde, ne oldu (eklendi/kaldırıldı/değişti), eski ve yeni hali.
+# Tek bir fark, hangi madde, ne oldu, eski ve yeni hali (değişen kısım «» içinde), çıkarılan ve eklenen ifadeler.
 @dataclass(frozen=True)
 class Fark:
     bolum: str
-    tur: str  # "eklendi" / "kaldırıldı" / "değişti"
+    tur: str  # "eklendi" / "kaldırıldı" / "değişti" / "mülga edildi"
     eski: str | None
     yeni: str | None
+    # Bu parçada metinden çıkarılan ve metne eklenen ifadeler, sırasıyla (değişti / mülga edildi). Eski kayıtlarda yok.
+    cikan: tuple[str, ...] = ()
+    giren: tuple[str, ...] = ()
 
 
-# Uzun metni 400 karaktere kısaltıp sonuna "…" koyar.
-def _kisalt(metin: str) -> str:
-    return metin if len(metin) <= PARCA_UZUNLUGU else metin[: PARCA_UZUNLUGU - 1].rstrip() + "…"
+# Uzun metni sınıra (varsayılan PARCA_UZUNLUGU) kısaltıp sonuna "…" koyar.
+def _kisalt(metin: str, sinir: int = PARCA_UZUNLUGU) -> str:
+    return metin if len(metin) <= sinir else metin[: sinir - 1].rstrip() + "…"
+
+
+# Madde metni "(Mülga: RG-…)" notuna indiyse "mülga edildi" denir.
+_MULGA_NOTU = re.compile(r"\(\s*Mülga\b", re.IGNORECASE)
 
 
 # Bir maddenin eski ve yeni halini kelime kelime karşılaştırır, değişen kelimeleri «» içine alır.
-def _degisen_parcalar(eski: str, yeni: str, baglam: int = 8) -> list[tuple[str, str]]:
+def _degisen_parcalar(eski: str, yeni: str, baglam: int = 8) -> tuple[list[tuple[str, str, tuple, tuple]], int]:
     """Kelime bazında karşılaştırma. Değişen kelimeler «» içinde, çevresinde `baglam` kelime.
-    Birbirine yakın değişiklikler tek parçada birleşir."""
+    Birbirine yakın değişiklikler tek parçada birleşir. Her parça (eski, yeni, çıkan ifadeler, giren ifadeler);
+    ikinci değer gösterilmeyen (BOLUM_BASINA_FARK üstü) parça sayısı."""
     # Metinleri kelime listesine çevir.
     e, y = eski.split(), yeni.split()
     # difflib farkları "işlem" listesi olarak verir, "aynı" olanları at, sadece değişenler kalsın.
@@ -300,33 +326,52 @@ def _degisen_parcalar(eski: str, yeni: str, baglam: int = 8) -> list[tuple[str, 
         return " ".join(parcalar)
 
     sonuc = []
-    # Her grup için eski ve yeni metinden çevresiyle birlikte bir parça çıkar (en fazla 4 grup).
+    # Her grup için eski ve yeni metinden çevresiyle birlikte bir parça çıkar (en fazla BOLUM_BASINA_FARK grup).
     for grup in gruplar[:BOLUM_BASINA_FARK]:
         # Parçanın başı ve sonu, ilk değişiklikten 8 kelime önce, son değişiklikten 8 kelime sonra.
         e_bas, e_son = max(0, grup[0][1] - baglam), min(len(e), grup[-1][2] + baglam)
         y_bas, y_son = max(0, grup[0][3] - baglam), min(len(y), grup[-1][4] + baglam)
+        cikan = tuple(_kisalt(" ".join(e[op[1]:op[2]]), IFADE_UZUNLUGU) for op in grup if op[2] > op[1])
+        giren = tuple(_kisalt(" ".join(y[op[3]:op[4]]), IFADE_UZUNLUGU) for op in grup if op[4] > op[3])
         sonuc.append((
             _kisalt(isaretle(e, [(op[1], op[2]) for op in grup], e_bas, e_son)),
             _kisalt(isaretle(y, [(op[3], op[4]) for op in grup], y_bas, y_son)),
+            cikan, giren,
         ))
-    return sonuc
+    return sonuc, max(0, len(gruplar) - BOLUM_BASINA_FARK)
+
+
+# Boşluk, tablo hücre ayırıcısı ve işaretler atılmış hal. Sadece bunlarda ayrılan iki metin aynı sayılır: okuyucu
+# değişince "sayılır. [1]" ile "sayılır.[1]", tablo satırında "|" farkı çıkıyor (yerel v1 okuyucu 1 ile ölçüldü, 2026-11-26).
+_BICIM = re.compile(r"[\s|«»…]+")
+
+
+def _ayni_yazi(a: str, b: str) -> bool:
+    return _BICIM.sub("", a) == _BICIM.sub("", b)
 
 
 # İki metin arasındaki bütün farkları madde madde listeler.
 def farklar(eski_metin: str, yeni_metin: str) -> list[Fark]:
     eski, yeni = bolumler(eski_metin), bolumler(yeni_metin)
     sonuc = []
-    # Yeni metindeki her madde, eskide yoksa "eklendi", varsa ve farklıysa "değişti".
+    # Yeni metindeki her madde, eskide yoksa "eklendi", varsa ve farklıysa "değişti" (ya da "mülga edildi").
     for ad, metin in yeni.items():
         if ad not in eski:
-            sonuc.append(Fark(ad, "eklendi", None, _kisalt(metin)))
-        elif eski[ad] != metin:
-            for e, y in _degisen_parcalar(eski[ad], metin):
-                sonuc.append(Fark(ad, "değişti", e, y))
+            sonuc.append(Fark(ad, "eklendi", None, _kisalt(metin, MADDE_UZUNLUGU)))
+        elif eski[ad] != metin and not _ayni_yazi(eski[ad], metin):
+            tur = "mülga edildi" if _MULGA_NOTU.search(metin) and not _MULGA_NOTU.search(eski[ad]) else "değişti"
+            parcalar, kalan = _degisen_parcalar(eski[ad], metin)
+            for e, y, cikan, giren in parcalar:
+                # Maddede gerçek değişiklik var ama bu parça sadece biçim farkı.
+                if not _ayni_yazi(e, y):
+                    sonuc.append(Fark(ad, tur, e, y, cikan, giren))
+            if kalan:
+                sonuc.append(Fark(ad, tur, None, f"… bu maddede {kalan} değişiklik daha var "
+                                                 "(tamamı panelde: Arşiv → mevzuat → Değişiklikler)."))
     # Eski metinde olup yenide olmayan madde, "kaldırıldı".
     for ad, metin in eski.items():
         if ad not in yeni:
-            sonuc.append(Fark(ad, "kaldırıldı", _kisalt(metin), None))
+            sonuc.append(Fark(ad, "kaldırıldı", _kisalt(metin, MADDE_UZUNLUGU), None))
     return sonuc
 
 
@@ -339,9 +384,22 @@ def fark_metni(fark_listesi: list[Fark]) -> str:
             satirlar.append(f"{f.bolum} eklendi: {f.yeni}")
         elif f.tur == "kaldırıldı":
             satirlar.append(f"{f.bolum} kaldırıldı (eski hali): {f.eski}")
+        elif f.eski is None:
+            satirlar.append(f"{f.bolum}: {f.yeni}")
         else:
-            satirlar.append(f"{f.bolum} değişti.\n  Eski: {f.eski}\n  Yeni: {f.yeni}")
+            satirlar.append(f"{f.bolum} {f.tur}.\n  Eski: {f.eski}\n  Yeni: {f.yeni}")
     return "\n".join(satirlar)
+
+
+# Raporun başındaki tek satırlık özet: "Madde 6 değişti; Ek Madde 1 eklendi; Geçici Madde 1 kaldırıldı".
+def fark_ozeti(fark_listesi: list[dict]) -> str:
+    gruplar: dict[str, list[str]] = {}
+    for f in fark_listesi:
+        bolumler_ = gruplar.setdefault(f.get("tur") or "değişti", [])
+        if f.get("bolum") and f["bolum"] not in bolumler_:
+            bolumler_.append(f["bolum"])
+    sira = ("değişti", "mülga edildi", "eklendi", "kaldırıldı")
+    return "; ".join(f"{', '.join(gruplar[t])} {t}" for t in sira if gruplar.get(t))
 
 
 # --- günlük adım ---------------------------------------------------------------------------------
@@ -360,33 +418,39 @@ def _izlenen_kaydi(session: Session, anahtar_: str, ad: str, neden: str, konu: s
 
 # Metni değişen mevzuat için rapora girecek bir kayıt oluşturur, başlığı "güncel metni değişti" diye biter.
 def _degisiklik_kaydi(
-    session: Session, izlenen: IzlenenMevzuat, fark_listesi: list[Fark], surum: MetinSurumu,
-    konular: list[Konu], calisma: Calisma, bugun: date, simdi: datetime,
-) -> Kayit:
+    session: Session, m: ArsivMevzuat, izlenen: IzlenenMevzuat | None, fark_listesi: list[Fark], surum_no: int,
+    konular: list[Konu], agirlik: dict[str, float], calisma: Calisma, bugun: date, simdi: datetime,
+) -> Kayit | None:
+    """Rapor şartı: mevzuat takipte, adı bir konuya uyuyor ya da değişen maddeler puanla bir konuyla ilgili.
+    Hiçbiri değilse kayıt açılmaz (None); değişiklik yine arşivde yeni sürüm olarak durur."""
+    ad = izlenen.ad if izlenen else m.ad
     # Mevzuatın adı hangi konulara uyuyor, takip listesinde konusu yazılıysa onu da ekle.
-    eslesen = eslesmeler(izlenen.ad, konular)
-    if izlenen.konu:
+    eslesen = eslesmeler(ad, konular)
+    if izlenen is not None and izlenen.konu:
         eslesen.setdefault(izlenen.konu, ["(takip listesindeki mevzuat)"])
     icerik = fark_metni(fark_listesi)
     # Değişen maddeler de puanlanır (arşivle aynı puan): KDV tebliğinin altın bölümü değiştiyse Kuyum'a da gider,
     # değişen metinde bir kez "altın" geçmesi ise yetmez.
-    from mevzuat import arama, pipeline
+    from mevzuat import pipeline
 
-    eslesen = pipeline.icerikle_eslesmeler("", icerik, konular, eslesen, arama.kelime_agirliklari(session),
-                                           ek="(değişiklikte)")
+    eslesen = pipeline.icerikle_eslesmeler("", icerik, konular, eslesen, agirlik, ek="(değişiklikte)")
+    if not eslesen and izlenen is None:
+        return None
     kayit = Kayit(
         kaynak=KAYNAK_ADI,
-        # Sürüm numarası, metin eski haline dönse bile her değişiklik ayrı kayıttır.
-        dis_id=f"{izlenen.anahtar}@{surum.id}",
+        # Arşiv sürüm numarası: metin eski haline dönse bile her değişiklik ayrı kayıttır. Eski kayıtlar
+        # "anahtar@<metin_surumleri.id>" biçiminde, "@v" ile çakışmaz.
+        dis_id=f"{m.anahtar}@v{surum_no}",
         yayin_tarihi=bugun,
-        baslik=f"{izlenen.ad} — güncel metni değişti",
+        baslik=f"{ad} — güncel metni değişti",
         tur="Değişen mevzuat",
         bolum="",
         sayi=None,
         mukerrer=0,
-        url=metin_url(izlenen.anahtar),
-        kaynakca=f"Mevzuat Bilgi Sistemi, {izlenen.ad}, güncel metin {bugun:%d.%m.%Y}",
-        ilgili=True,  # takipteki mevzuat zaten ilgili seçilmiş
+        url=m.url or metin_url(m.anahtar),
+        kaynakca=f"Mevzuat Bilgi Sistemi, {ad}, güncel metin {bugun:%d.%m.%Y}",
+        # Takipteki mevzuat zaten ilgili seçilmiş; takipte değilse konulara uyduğu için buraya geldi.
+        ilgili=True,
         eslesmeler=eslesen,
         is_kollari=is_kollari(eslesen, konular),
         icerik=icerik,
@@ -401,7 +465,118 @@ def _degisiklik_kaydi(
     return kayit
 
 
-# Her gün çalışan adım bu. Takip listesini günceller, vakti gelen mevzuatın metnini çeker, değiştiyse fark kaydı oluşturur.
+# --- arşivle bağlantı ----------------------------------------------------------------------------
+
+# Tür numarası (anahtarın ilk parçası) → arşivin listeleme türü (arsiv.TURLER). Arşivde olmayan bir mevzuat bugün
+# güncellenenlerde ya da takip listesinde çıkınca bununla açılır. Sunucu arşivinde ölçüldü (2026-11-26, 19.346 kayıt):
+# her numara tek türde. 5, 24, 25 sadece mülga listesinde, onlar açılmaz.
+TUR_NUMARALARI = {
+    "0": "Kanun", "1": "Kanun", "2": "Tuzuk", "6": "Tuzuk", "17": "Tuzuk", "4": "KHK",
+    "3": "TumYonetmelik", "7": "TumYonetmelik", "8": "TumYonetmelik", "21": "TumYonetmelik",
+    "9": "Teblig", "19": "CumhurbaskaniKararnameleri", "20": "CumhurbaskaniKararlari",
+}
+# Arşiv işi sürerken (dosya kilidi dolu) ya da hata yüzünden bakılamayanlar burada bekler, sonraki çalışmada denenir.
+BEKLEYEN_AYARI = "arsiv_takip_bekleyen"
+
+
+def _bekleyenler(session: Session) -> list[str]:
+    ayar = session.get(SistemAyari, BEKLEYEN_AYARI)
+    return list(ayar.deger) if ayar is not None and isinstance(ayar.deger, list) else []
+
+
+def _bekleyenleri_yaz(session: Session, anahtarlar: set[str], simdi: datetime) -> None:
+    ayar = session.get(SistemAyari, BEKLEYEN_AYARI)
+    if ayar is None:
+        if anahtarlar:
+            session.add(SistemAyari(anahtar=BEKLEYEN_AYARI, deger=sorted(anahtarlar), guncelleme=simdi))
+        return
+    ayar.deger, ayar.guncelleme = sorted(anahtarlar), simdi
+
+
+# Arşivde olmayan mevzuatı açar (metni henüz yok). Tür numarası tanınmıyorsa None.
+def _arsive_ekle(session: Session, anahtar_: str, g: Guncellenen | None, izlenen: IzlenenMevzuat | None,
+                 simdi: datetime) -> ArsivMevzuat | None:
+    tur = TUR_NUMARALARI.get(anahtar_.split(".")[0])
+    if tur is None:
+        return None
+    t, tertip, no = anahtar_.split(".")
+    pdf = g is not None and g.sadece_pdf
+    url = (urljoin(ANA_SAYFA, g.href) if g is not None and g.href
+           else f"{ANA_SAYFA}mevzuat?MevzuatNo={no}&MevzuatTur={t}&MevzuatTertip={tertip}")
+    m = ArsivMevzuat(anahtar=anahtar_, tur=tur, ad=(g.ad if g else izlenen.ad if izlenen else anahtar_), url=url,
+                     rg_tarihi=g.rg_tarihi if g else None, rg_sayisi=None, bicim="pdf" if pdf else "html",
+                     mulga=False, ilk_gorulme=simdi, son_gorulme=simdi, kayip_sayisi=0, durum="BEKLIYOR",
+                     deneme=0, surum_sayisi=0)
+    session.add(m)
+    session.commit()
+    return m
+
+
+def _son_surum(session: Session, anahtar_: str) -> ArsivSurumu | None:
+    return session.scalar(select(ArsivSurumu).where(ArsivSurumu.anahtar == anahtar_)
+                          .order_by(ArsivSurumu.surum_no.desc()).limit(1))
+
+
+@dataclass
+class _Baglam:
+    """Bir takip çalışmasında her mevzuat için aynı kalanlar."""
+    session: Session
+    ist: object  # arsiv.Istemci
+    klasor: Path
+    gunluk: object  # arsiv_cekim.Gunluk
+    konular: list[Konu]
+    agirlik: dict[str, float]
+    calisma: Calisma
+    bugun: date
+    simdi: datetime
+
+
+# Bir mevzuatı arşive çeker, değiştiyse önceki arşiv sürümüyle karşılaştırır. Sonuç sayacın anahtarı.
+def _arsivle_karsilastir(b: _Baglam, anahtar_: str, g: Guncellenen | None, izlenen: IzlenenMevzuat | None) -> str:
+    """Sonuçlar: taban (arşive ilk sürüm), degisen (rapor kaydı açıldı), ilgisiz_degisen (değişti ama hiçbir konuya
+    uymuyor), ayni, okuma_duzeltmesi (kaynak aynı, rapor yok, karar 19), sitede_yok, arsive_eklenen (PDF'li yeni
+    yayın, metni haftalık işte), atlandi (tür tanınmadı), hata."""
+    from mevzuat import arsiv, arsiv_cekim
+
+    s = b.session
+    m = s.get(ArsivMevzuat, anahtar_)
+    if m is None:
+        m = _arsive_ekle(s, anahtar_, g, izlenen, b.simdi)
+        if m is None:
+            log.warning("Arşivde yok ve türü tanınmadı, atlandı: %s", anahtar_)
+            return "atlandi"
+    # Cumhurbaşkanı kararları gibi PDF'li yeni yayınlarda OCR uzun sürebilir; henüz hiç sürümü yoksa metni haftalık
+    # liste işi alır (liste ertesi gün de aynı yeni yayınları gösteriyor).
+    if m.bicim == "pdf" and not m.surum_sayisi:
+        return "arsive_eklenen"
+    onceki = _son_surum(s, anahtar_)
+    onceki_no, onceki_metin = (onceki.surum_no, onceki.metin) if onceki else (0, None)
+    try:
+        sonuc = arsiv_cekim.mevzuati_cek(s, b.ist, m, b.klasor, b.simdi, b.gunluk, arsiv.metin_adresi)
+    except Exception as e:
+        s.rollback()
+        m = s.get(ArsivMevzuat, anahtar_)
+        m.durum, m.deneme, m.son_hata = "HATA", m.deneme + 1, repr(e)[:1000]
+        s.commit()
+        log.warning("Güncel metin arşive alınamadı: %s (%s): %r", m.ad[:80], anahtar_, e)
+        return "hata"
+    if sonuc in ("yeni", "okuma_duzeltmesi"):
+        arsiv.dizin_ve_filtre(s, anahtar_, b.konular, b.simdi)
+    if sonuc != "yeni":
+        return sonuc
+    yeni = _son_surum(s, anahtar_)
+    if onceki_metin is None or yeni is None or yeni.surum_no == onceki_no:
+        return "taban"  # ilk sürüm, karşılaştıracak önceki hal yok, rapor üretilmez
+    fark_listesi = farklar(onceki_metin, yeni.metin)
+    if not fark_listesi:
+        return "ayni"  # sürüm farkı eklerde ya da yalnız biçimde; maddelerde fark yok
+    kayit = _degisiklik_kaydi(s, m, izlenen, fark_listesi, yeni.surum_no, b.konular, b.agirlik, b.calisma,
+                              b.bugun, b.simdi)
+    return "degisen" if kayit is not None else "ilgisiz_degisen"
+
+
+# Her gün çalışan adım bu. Takip listesini günceller; bugün güncellenenleri ve vakti gelen takiptekileri arşive çeker,
+# arşivde yeni sürüm (değişiklik) çıktıysa önceki sürümle karşılaştırıp fark kaydı oluşturur.
 def takip_et(
     session: Session,
     client: httpx.Client,
@@ -410,9 +585,19 @@ def takip_et(
     calisma: Calisma,
     bugun: date,
     simdi: datetime,
+    klasor: Path | None = None,
 ) -> dict:
+    """Arşiv taban: mevzuatın arşivdeki son sürümü v1 ise yeni hali v2 olur ve v1↔v2 rapora girer, sonra v2↔v3.
+    Arşivde olmayan mevzuat açılır, ilk sürümü rapor üretmez (yeni yayını Resmî Gazete kaynağı zaten getiriyor).
+    Arşiv işi sürüyorsa (arsiv.lock dolu) bu çalışmada arşive dokunulmaz, bakılacaklar sonraki çalışmaya kalır."""
+    from filelock import FileLock, Timeout
+
+    from mevzuat import arama, arsiv
+    from mevzuat.arsiv_cekim import Gunluk
+
     # Özette görünecek sayaçlar.
-    ozet_sayac = {"taban": 0, "degisen": 0, "ayni": 0, "hata": 0, "otomatik_eklenen": 0}
+    ozet_sayac = {"taban": 0, "degisen": 0, "ilgisiz_degisen": 0, "ayni": 0, "okuma_duzeltmesi": 0, "sitede_yok": 0,
+                  "arsive_eklenen": 0, "atlandi": 0, "hata": 0, "ertelenen": 0, "otomatik_eklenen": 0}
 
     # Ana sayfayı indir, "bugün güncellenenler" listesini çıkar.
     bugun_guncellenen = {g.anahtar: g for g in guncellenenleri_cek(client)}
@@ -430,46 +615,46 @@ def takip_et(
     session.commit()
 
     ayardakiler = {t.anahtar for t in tanimlar}
-    # Takipteki her mevzuat için.
-    for izlenen in session.scalars(select(IzlenenMevzuat).order_by(IzlenenMevzuat.anahtar)).all():
-        if izlenen.neden == "ayar" and izlenen.anahtar not in ayardakiler:
-            continue  # ayar dosyasından çıkarılmış, takip bırakılır (eski sürümler kanıt olarak durur)
-        # Bugün listede çıkmadıysa ve son kontrolden 7 gün geçmediyse atla.
-        vakti_geldi = izlenen.son_kontrol is None or simdi - izlenen.son_kontrol >= KONTROL_ARALIGI
-        if izlenen.anahtar not in bugun_guncellenen and not vakti_geldi:
-            continue
-        # Güncel metni indir (hata olursa say ve sıradakine geç). finally, her durumda 1 sn bekle.
-        try:
-            metin = metin_cek(client, izlenen.anahtar)
-        except Exception:
-            log.exception("Güncel metin alınamadı: %s (%s)", izlenen.ad, izlenen.anahtar)
-            ozet_sayac["hata"] += 1
-            continue
-        finally:
-            time.sleep(ISTEK_ARASI_BEKLEME)
+    # Ayar dosyasından çıkarılan takip bırakılır (eski kayıtlar kanıt olarak durur).
+    izlenenler = {i.anahtar: i for i in session.scalars(select(IzlenenMevzuat)).all()
+                  if not (i.neden == "ayar" and i.anahtar not in ayardakiler)}
+    # Bakılacaklar: önceki çalışmadan kalanlar, bugün güncellenenlerin hepsi, son kontrolden 7 gün geçen takiptekiler.
+    bakilacak: dict[str, Guncellenen | None] = dict.fromkeys(_bekleyenler(session))
+    bakilacak.update(bugun_guncellenen)
+    for i in izlenenler.values():
+        if i.son_kontrol is None or simdi - i.son_kontrol >= KONTROL_ARALIGI:
+            bakilacak.setdefault(i.anahtar, None)
 
-        # Yeni metnin özeti ve veritabanındaki son sürüm.
-        yeni_ozet = ozet(metin)
-        son = session.scalar(
-            select(MetinSurumu).where(MetinSurumu.anahtar == izlenen.anahtar).order_by(MetinSurumu.id.desc()).limit(1)
-        )
-        # İlk kez ya da metin değiştiyse yeni sürüm olarak sakla.
-        if son is None or son.ozet != yeni_ozet:
-            surum = MetinSurumu(anahtar=izlenen.anahtar, cekildi=simdi, ozet=yeni_ozet, metin=metin)
-            session.add(surum)
-            session.flush()  # surum.id lazım
-        if son is None:
-            ozet_sayac["taban"] += 1  # ilk çekim, karşılaştıracak önceki hal yok, rapor üretilmez
-        elif son.ozet == yeni_ozet:
-            ozet_sayac["ayni"] += 1
-        # Değiştiyse farkları bul, gerçek fark varsa rapora girecek kaydı oluştur.
-        else:
-            fark_listesi = farklar(son.metin, metin)
-            if fark_listesi:  # yalnız boşluk/biçim farkıysa rapor üretme
-                _degisiklik_kaydi(session, izlenen, fark_listesi, surum, konular, calisma, bugun, simdi)
-                ozet_sayac["degisen"] += 1
-            else:
-                ozet_sayac["ayni"] += 1
-        izlenen.son_kontrol = simdi
-        session.commit()  # her mevzuat ayrı, yarıda kesilirse yapılanlar kaybolmaz
+    klasor = klasor or arsiv.arsiv_klasoru()
+    klasor.mkdir(parents=True, exist_ok=True)
+    kilit = FileLock(str(klasor / "arsiv.lock"), timeout=0)
+    try:
+        kilit.acquire()
+    except Timeout:
+        log.warning("Arşiv işi sürüyor (arsiv.lock dolu); %d mevzuat sonraki çalışmaya kaldı", len(bakilacak))
+        _bekleyenleri_yaz(session, set(bakilacak), simdi)
+        session.commit()
+        ozet_sayac["ertelenen"] = len(bakilacak)
+        return ozet_sayac
+    try:
+        gunluk = Gunluk(klasor / "gunluk" / f"takip-{simdi:%Y%m%d-%H%M%S}.jsonl")
+        b = _Baglam(session, arsiv.Istemci(client, gunluk=gunluk), klasor, gunluk, konular,
+                    arama.kelime_agirliklari(session), calisma, bugun, simdi)
+        kalan: set[str] = set()
+        # Önce takiptekiler.
+        for anahtar_ in sorted(bakilacak, key=lambda a: (a not in izlenenler, a)):
+            izlenen = izlenenler.get(anahtar_)
+            sonuc = _arsivle_karsilastir(b, anahtar_, bakilacak[anahtar_], izlenen)
+            ozet_sayac[sonuc] += 1
+            m = session.get(ArsivMevzuat, anahtar_)
+            # Hata verdiyse sonraki çalışmada tekrar denenir (en fazla arsiv.EN_FAZLA_DENEME kez).
+            if sonuc == "hata" and m is not None and m.deneme < arsiv.EN_FAZLA_DENEME:
+                kalan.add(anahtar_)
+            elif izlenen is not None and sonuc != "atlandi":
+                izlenen.son_kontrol = simdi
+            session.commit()  # her mevzuat ayrı, yarıda kesilirse yapılanlar kaybolmaz
+        _bekleyenleri_yaz(session, kalan, simdi)
+        session.commit()
+    finally:
+        kilit.release()
     return ozet_sayac

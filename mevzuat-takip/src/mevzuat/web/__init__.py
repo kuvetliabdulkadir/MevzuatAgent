@@ -133,7 +133,7 @@ API_GRUPLARI = {
     "parola-linki": "Oturum ve giriş", "menu": "Menü", "raporlar": "Raporlar", "gruplar": "Alıcı grupları",
     "kaynaklar": "Kaynaklar", "kaynak-tipleri": "Kaynaklar", "konular": "Konular", "tarama": "Tarama",
     "zamanlama": "Tarama", "kullanicilar": "Kullanıcılar", "denetim": "Denetim kaydı", "ayarlar": "Ayarlar",
-    "api-anahtarlari": "API anahtarları",
+    "api-anahtarlari": "API anahtarları", "arsiv": "Arşiv",
 }
 
 # Swagger sayfası. Dosyalar (frontend/public/swagger) kendi sunucumuzdan gelir, satır içi script yoktur, CSP bozulmaz.
@@ -688,7 +688,7 @@ def uygulama_olustur(
                     "ozet": k.ozet, "ozet_tablosu": k.ozet_tablosu, "yururluk": k.yururluk,
                     "one_cikanlar": k.one_cikanlar, "metin": k.metin, "kisaltildi": k.kisaltildi, "ocr": k.ocr,
                     "okunamadi": k.kayit.icerik_durumu in ("OCR_GEREKLI", "HATA"),
-                    "degisiklikler": k.degisiklikler, "kaynakca": k.kaynakca, "haric": k.kayit.haric,
+                    "degisiklikler": k.degisiklikler, "degisiklik_ozeti": k.degisiklik_ozeti, "kaynakca": k.kaynakca, "haric": k.kayit.haric,
                     # Onaylayıcı belgenin aslına baksın diye resmî adres, sadece http ve https.
                     "url": k.kayit.url if k.kayit.url.startswith(("https://", "http://")) else None,
                     # Başlıkta kelimesi yakalanan konuların açıklamaları, bu konu bizi neden ilgilendiriyor.

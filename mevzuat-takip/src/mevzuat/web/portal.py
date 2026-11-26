@@ -45,9 +45,13 @@ class MevzuatOzeti(BaseModel):
 
 class Degisiklik(BaseModel):
     bolum: str = Field(examples=["Madde 4"])
-    tur: str = Field(description="eklendi, kaldırıldı ya da değişti", examples=["değişti"])
+    tur: str = Field(description="eklendi, kaldırıldı, değişti ya da mülga edildi", examples=["değişti"])
     eski: str | None = Field(examples=["… «yüzde 20» oranında …"])
     yeni: str | None = Field(examples=["… «yüzde 25» oranında …"])
+    cikan: list[str] = Field(default_factory=list, description="Bu parçada metinden çıkarılan ifadeler",
+                             examples=[["yüzde 20"]])
+    giren: list[str] = Field(default_factory=list, description="Bu parçada metne eklenen ifadeler",
+                             examples=[["yüzde 25"]])
 
 
 class MevzuatDetayi(MevzuatOzeti):

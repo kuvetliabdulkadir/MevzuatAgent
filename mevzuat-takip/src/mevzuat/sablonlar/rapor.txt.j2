@@ -39,12 +39,20 @@ Rakam, liste numarası ve kişi/kuruluş adlarında hata olabilir. Ekteki orijin
 {{ k.tur_adi }} · {{ k.kayit.yayin_tarihi.strftime("%d.%m.%Y") }}
 
 {% if k.degisiklikler %}
-Güncel metindeki değişiklikler (değişen kısım «» içinde):
+{% if k.degisiklik_ozeti %}Özet: {{ k.degisiklik_ozeti }}
+{% endif %}
+Madde madde değişiklikler (değişen kısım «» içinde):
 {% for d in k.degisiklikler %}
 - {{ d.bolum }} — {{ d.tur }}
 {% if d.eski %}    Eski: {{ d.eski }}
 {% endif %}
 {% if d.yeni %}    Yeni: {{ d.yeni }}
+{% endif %}
+{% if d.cikan %}    Çıkarılan: {% for x in d.cikan %}"{{ x }}"{% if not loop.last %}, {% endif %}{% endfor %}
+
+{% endif %}
+{% if d.giren %}    Eklenen: {% for x in d.giren %}"{{ x }}"{% if not loop.last %}, {% endif %}{% endfor %}
+
 {% endif %}
 {% endfor %}
 {% endif %}

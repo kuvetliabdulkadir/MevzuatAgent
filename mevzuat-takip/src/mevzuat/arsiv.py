@@ -34,7 +34,7 @@ import os
 import re
 import time
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
@@ -95,6 +95,8 @@ AKTIF_ISTEK = ("BEKLIYOR", "CALISIYOR", "DURDURULUYOR")
 YAVASLATAN_KODLAR = (429, 502, 503, 504)
 EN_FAZLA_EK_BEKLEME = 60.0
 YAVASLAMA_SONRASI_BASARI = 20
+# Haftalık liste yenilemesi (zamanlayıcı, haftalik_istek) en az bu aralıkla.
+HAFTALIK_ARALIK = timedelta(days=7)
 
 
 # Dosyaların yazılacağı klasör.
@@ -348,6 +350,19 @@ def kuyruk(session: Session, turler: list[str], yeniden: bool, esik: datetime,
 
 # --- iş --------------------------------------------------------------------------------------------
 
+# Yeni sürümde arama dizini ve konu filtresi o mevzuat için hemen güncellenir (Faz 2, 3). Arşiv işi ve günlük takip
+# (surum.takip_et) bunu çağırır. Önce yapılanı kaydeder; dizin/filtre hatası mevzuatın kendisini düşürmez.
+def dizin_ve_filtre(session: Session, anahtar: str, konular: list, simdi: datetime) -> None:
+    from mevzuat import arama
+    session.commit()
+    try:
+        arama.dizini_guncelle(session, anahtar)
+        arama.konulari_uygula(session, konular, anahtar=anahtar, simdi=simdi)
+    except Exception as e:
+        session.rollback()
+        log.warning("Arama dizini/konu filtresi güncellenemedi (%s): %r", anahtar, e)
+
+
 class Durduruldu(Exception):
     pass
 
@@ -463,16 +478,8 @@ class ArsivIsi:
             log.info("Liste %s: %d/%d kayıt, %s", tur, len(satirlar), toplam, sayac)
             self.kaydet_ve_bak()
 
-    # Yeni sürümde arama dizini ve konu filtresi o mevzuat için hemen güncellenir (Faz 2, 3).
     def _dizin_ve_filtre(self, anahtar: str, konular: list) -> None:
-        from mevzuat import arama
-        self.session.commit()
-        try:
-            arama.dizini_guncelle(self.session, anahtar)
-            arama.konulari_uygula(self.session, konular, anahtar=anahtar, simdi=self.saat())
-        except Exception as e:  # dizin/filtre hatası mevzuatın kendisini düşürmesin
-            self.session.rollback()
-            log.warning("Arama dizini/konu filtresi güncellenemedi (%s): %r", anahtar, e)
+        dizin_ve_filtre(self.session, anahtar, konular, self.saat())
 
     # Bir mevzuatı çeker. Başarılıysa True; hata mevzuata yazılır, iş devam eder.
     def _mevzuati_isle(self, anahtar: str, konular: list) -> bool:
@@ -604,6 +611,30 @@ def istek_olustur(session: Session, kullanici_id: int, turler: list[str] | None,
         session.flush()
     except IntegrityError:
         raise ValueError("Bir arşiv işi zaten sırada ya da çalışıyor.") from None
+    return istek
+
+
+# Arşiv doluysa ve son HAFTALIK_ARALIK içinde liste yenileyen bir iş istenmediyse zamanlayıcı bunu çağırır (commit etmez).
+def haftalik_istek(session: Session, simdi: datetime) -> ArsivIstegi | None:
+    """Haftalık liste yenilemesi: bütün türlerin listesi alınır (~330 istek, ~15 dk), metni sadece yeni ve hata vermiş
+    mevzuatın çekilir (yeniden=False). Yeni mevzuat v1 olur, listeden düşen iki haftada "kalktı" sayılır, hatalılar
+    yeniden denenir. Arşiv boşsa hiç açılmaz: boş arşivde bu iş tam tarama olurdu."""
+    if not session.scalar(select(func.count()).select_from(ArsivMevzuat).where(ArsivMevzuat.surum_sayisi > 0)):
+        return None
+    if session.scalar(select(ArsivIstegi.id).where(ArsivIstegi.durum.in_(AKTIF_ISTEK)).limit(1)):
+        return None
+    # Sadece listeyi de alan işler sayılır; deneme seti (anahtarlar) listeye bakmaz.
+    for istek in session.scalars(select(ArsivIstegi).where(ArsivIstegi.istendi > simdi - HAFTALIK_ARALIK)):
+        if not (istek.secenekler or {}).get("anahtarlar") and istek.durum not in ("HATALI", "DURDURULDU"):
+            return None
+    istek = ArsivIstegi(isteyen_id=None, istendi=simdi, durum="BEKLIYOR",
+                        secenekler={"turler": list(TURLER), "yeniden": False, "haftalik": True})
+    session.add(istek)
+    try:
+        session.flush()
+    except IntegrityError:
+        session.rollback()
+        return None
     return istek
 
 

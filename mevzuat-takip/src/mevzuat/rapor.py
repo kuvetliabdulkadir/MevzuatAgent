@@ -18,10 +18,11 @@ from urllib.parse import urlparse
 import httpx
 # Jinja2, mail şablonlarını (sablonlar/rapor.html.j2) doldurmak için şablon motoru.
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup, escape
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from mevzuat import alicilar
+from mevzuat import alicilar, surum
 from mevzuat.db import Gonderim, Kayit, KonuTanimi, Rapor
 from mevzuat.filtre import TUM_DUYURULAR, tr_kucuk
 from mevzuat.mail import Ek, Mail, MailGonderici
@@ -46,6 +47,24 @@ _sablonlar = Environment(
 )
 
 
+# Fark parçasındaki «değişen kısım» işaretlerini mailde renkli gösterir: eski metinde silinen üstü çizili kırmızı,
+# yeni metinde eklenen kalın yeşil. Metin önce kaçışlanır, sadece kendi span'lerimiz HTML olur.
+_ISARETLI = re.compile(r"«([^«»]*)»")
+_VURGU_STILI = {
+    "eski": "background:#fbe3df;color:#8a2b1d;text-decoration:line-through;padding:0 2px;",
+    "yeni": "background:#dcf2e1;color:#1d5c2e;font-weight:bold;padding:0 2px;",
+}
+
+
+def _vurgula(metin: str | None, taraf: str) -> Markup:
+    kacisli = str(escape(metin or ""))
+    stil = _VURGU_STILI[taraf]
+    return Markup(_ISARETLI.sub(lambda m: f'<span style="{stil}">{m.group(1) or "∅"}</span>', kacisli))
+
+
+_sablonlar.filters["vurgula"] = _vurgula
+
+
 # Rapordaki tek bir kalem (bir belge) için hazırlanmış her şey.
 @dataclass
 class RaporKalemi:
@@ -63,6 +82,8 @@ class RaporKalemi:
     ek_adi: str | None = None
     # "Güncel metni değişti" kalemleri (surum.py), [{bolum, tur, eski, yeni}]. Doluysa özet/tablo/yürürlük yerine gösterilir.
     degisiklikler: list[dict] | None = None
+    # Değişikliklerin tek satır özeti: "Madde 6 değişti; Ek Madde 1 eklendi" (surum.fark_ozeti).
+    degisiklik_ozeti: str | None = None
     # "Neden önemli" satırları, [(konu, açıklama)], rapor_olustur doldurur.
     nedenler: list[tuple[str, str]] = field(default_factory=list)
     # Belgenin resmî kaynaktaki adresi (sadece http ve https), rapor_olustur doldurur.
@@ -339,7 +360,10 @@ def _kalem(no: int, kayit: Kayit) -> RaporKalemi:
         return RaporKalemi(
             no=no, kayit=kayit, tur_adi=tur_adi(kayit), ozet=None, ozet_tablosu=[], yururluk=None, one_cikanlar=[],
             kaynakca=kisa_kaynakca(kayit), metin=None, kisaltildi=False, ocr=False,
-            degisiklikler=[{**d, "eski": linksiz(d["eski"] or ""), "yeni": linksiz(d["yeni"] or "")} for d in kayit.degisiklikler],
+            degisiklikler=[{**d, "eski": linksiz(d["eski"] or ""), "yeni": linksiz(d["yeni"] or ""),
+                            "cikan": [linksiz(x) for x in d.get("cikan") or []],
+                            "giren": [linksiz(x) for x in d.get("giren") or []]} for d in kayit.degisiklikler],
+            degisiklik_ozeti=surum.fark_ozeti(kayit.degisiklikler),
         )
     # Metni temizle (adresleri sil, fazla boş satırları azalt).
     metin = linksiz((kayit.icerik or "").replace("\r\n", "\n").strip())

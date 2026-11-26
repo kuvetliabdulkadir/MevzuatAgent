@@ -278,6 +278,24 @@ export const RaporModal: React.FC<RaporModalProps> = ({ raporId, kullanici, onKa
 };
 
 // Tek bir kalemin kartı, işaret kutusu, başlık, iş kolları, eşleşen kelimeler, kime gideceği, özet, yürürlük, metin.
+// Fark parçasındaki «değişen kısım» işaretlerini renkli gösterir: eski metinde silinen üstü çizili kırmızı,
+// yeni metinde eklenen kalın yeşil (maildeki gösterimle aynı).
+const Isaretli: React.FC<{ metin: string; taraf: 'eski' | 'yeni' }> = ({ metin, taraf }) => (
+  <>
+    {metin.split(/(«[^«»]*»)/).map((p, i) =>
+      p.startsWith('«') && p.endsWith('»') ? (
+        <span key={i} className={taraf === 'eski'
+          ? 'bg-rose-100 text-rose-800 line-through px-0.5 rounded-sm'
+          : 'bg-emerald-100 text-emerald-900 font-semibold px-0.5 rounded-sm'}>
+          {p.slice(1, -1) || '∅'}
+        </span>
+      ) : (
+        <React.Fragment key={i}>{p}</React.Fragment>
+      ),
+    )}
+  </>
+);
+
 const KalemKarti: React.FC<{
   kalem: Kalem;
   secilebilir: boolean;
@@ -355,20 +373,33 @@ const KalemKarti: React.FC<{
     {/* Metni değişen mevzuatta, madde madde eski (kırmızı) ve yeni (yeşil) hali. */}
     {k.degisiklikler && (
       <div className="space-y-2">
+        {k.degisiklik_ozeti && (
+          <div className="text-xs text-stone-800"><strong>Özet:</strong> {k.degisiklik_ozeti}</div>
+        )}
         <p className="text-[11px] font-semibold text-stone-500 uppercase font-mono">
-          Güncel metindeki değişiklikler (değişen kısım «» içinde)
+          Madde madde değişiklikler: solda eski metin (çıkarılan kısım üstü çizili), sağda yeni metin (eklenen kısım yeşil)
         </p>
         {k.degisiklikler.map((d, i) => (
           <div key={i} className="space-y-1">
             <div className="text-xs font-semibold text-stone-800">{d.bolum} — {d.tur}</div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <pre className="text-xs font-sans whitespace-pre-wrap [overflow-wrap:anywhere] bg-rose-50/40 p-2.5 rounded-sm border border-rose-200 text-stone-700">
-                {d.eski || '(yok)'}
+                {d.eski ? <Isaretli metin={d.eski} taraf="eski" /> : '(yok)'}
               </pre>
               <pre className="text-xs font-sans whitespace-pre-wrap [overflow-wrap:anywhere] bg-emerald-50/40 p-2.5 rounded-sm border border-emerald-200 text-stone-800">
-                {d.yeni || '(kaldırıldı)'}
+                {d.yeni ? <Isaretli metin={d.yeni} taraf="yeni" /> : '(kaldırıldı)'}
               </pre>
             </div>
+            {((d.cikan?.length ?? 0) > 0 || (d.giren?.length ?? 0) > 0) && (
+              <div className="text-[11px] space-y-0.5">
+                {d.cikan && d.cikan.length > 0 && (
+                  <div className="text-rose-800"><strong>Çıkarılan:</strong> {d.cikan.map((x) => `“${x}”`).join(', ')}</div>
+                )}
+                {d.giren && d.giren.length > 0 && (
+                  <div className="text-emerald-800"><strong>Eklenen:</strong> {d.giren.map((x) => `“${x}”`).join(', ')}</div>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>

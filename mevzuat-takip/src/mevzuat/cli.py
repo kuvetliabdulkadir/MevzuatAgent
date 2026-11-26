@@ -51,7 +51,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mevzuat import gunluk, pipeline, rapor, surum, tanimlar, zamanlama
-from mevzuat.db import IzlenenMevzuat, Kayit, MetinSurumu, make_engine, migrate
+from mevzuat.db import ArsivMevzuat, IzlenenMevzuat, Kayit, make_engine, migrate
 from mevzuat.filtre import is_kollari
 from mevzuat.http import make_client
 from mevzuat.mail import DosyaGonderici, Mail
@@ -380,14 +380,12 @@ def gonderim_durum_komutu(args: argparse.Namespace) -> None:
 # "izlenen" komutu, güncel metni takip edilen mevzuatı listeler.
 def izlenen_komutu(args: argparse.Namespace) -> None:
     """Güncel metni takip edilen mevzuatı listeler. Neden takipte olduğu, en son ne zaman bakıldığı ve kaç sürümü olduğu görünür."""
-    from sqlalchemy import func
-
     engine = make_engine()
     migrate(engine)
     with Session(engine) as session:
-        sayilar = dict(session.execute(
-            select(MetinSurumu.anahtar, func.count()).group_by(MetinSurumu.anahtar)
-        ).all())
+        # Sürümler arşivde (surum.takip_et); arşivden önceki eski sürümler metin_surumleri'nde kanıt olarak durur.
+        sayilar = dict(session.execute(select(ArsivMevzuat.anahtar, ArsivMevzuat.surum_sayisi)
+                                       .join(IzlenenMevzuat, IzlenenMevzuat.anahtar == ArsivMevzuat.anahtar)).all())
         izlenenler = session.scalars(select(IzlenenMevzuat).order_by(IzlenenMevzuat.neden, IzlenenMevzuat.ad)).all()
         if not izlenenler:
             print("Henüz takipte mevzuat yok (ilk günlük çalışmada config/izlenen_mevzuat.toml'dan eklenir).")
