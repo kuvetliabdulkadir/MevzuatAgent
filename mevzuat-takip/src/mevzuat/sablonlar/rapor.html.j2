@@ -75,6 +75,7 @@
         {# Metni değişen mevzuatta, madde madde eski/yeni. #}
         {% if k.degisiklikler %}
         {% if k.degisiklik_ozeti %}<div style="font-size:14px;line-height:1.5;margin-bottom:6px;"><strong>Özet:</strong> {{ k.degisiklik_ozeti }}</div>{% endif %}
+        {% if k.karsilastirma_linki %}<div style="margin-bottom:8px;"><a href="{{ k.karsilastirma_linki }}" style="display:inline-block;padding:6px 12px;background:#1f4e5a;color:#ffffff;text-decoration:none;border-radius:4px;font-size:13px;font-weight:bold;">Değişikliklerin tamamını gör (eski ve yeni metin, madde madde)</a></div>{% endif %}
         <div style="font-size:12px;color:#6b6b63;margin-bottom:4px;">Madde madde değişiklikler. Eski metinde <span style="background:#fbe3df;color:#8a2b1d;text-decoration:line-through;padding:0 2px;">çıkarılan</span>, yeni metinde <span style="background:#dcf2e1;color:#1d5c2e;font-weight:bold;padding:0 2px;">eklenen</span> kısım işaretli.</div>
         {% for d in k.degisiklikler %}
         <div style="margin-top:8px;font-size:13px;line-height:1.5;border-left:3px solid #e6e6e0;padding-left:10px;">

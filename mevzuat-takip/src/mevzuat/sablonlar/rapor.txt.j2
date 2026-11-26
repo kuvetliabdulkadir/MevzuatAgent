@@ -41,6 +41,8 @@ Rakam, liste numarası ve kişi/kuruluş adlarında hata olabilir. Ekteki orijin
 {% if k.degisiklikler %}
 {% if k.degisiklik_ozeti %}Özet: {{ k.degisiklik_ozeti }}
 {% endif %}
+{% if k.karsilastirma_linki %}Değişikliklerin tamamı: {{ k.karsilastirma_linki }}
+{% endif %}
 Madde madde değişiklikler (değişen kısım «» içinde):
 {% for d in k.degisiklikler %}
 - {{ d.bolum }} — {{ d.tur }}

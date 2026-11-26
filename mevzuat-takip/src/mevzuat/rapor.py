@@ -47,6 +47,29 @@ _sablonlar = Environment(
 )
 
 
+# Değişen mevzuatın tam karşılaştırma sayfası (web: /karsilastirma/…). Maili alanların çoğunun panel hesabı yok, sayfa
+# girişsiz açılır; bağlantı MEVZUAT_GIZLI_ANAHTAR ile imzalı, adres elle değiştirilirse (başka mevzuat/sürüm) açılmaz.
+# Gösterilen sadece mevzuat.gov.tr'deki kamuya açık metin ve iki sürümün farkı.
+def karsilastirma_imzasi(anahtar: str, surum: int, gizli: str) -> str:
+    import hashlib
+    import hmac
+
+    return hmac.new(gizli.encode(), f"karsilastirma|{anahtar}|{surum}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def karsilastirma_linki(panel_adresi: str | None, kayit: Kayit, gizli: str | None = None) -> str | None:
+    """"anahtar@vN" biçimli değişen mevzuat kaydının tam karşılaştırma adresi. Panel adresi ya da gizli anahtar yoksa None."""
+    import os
+    from urllib.parse import quote
+
+    gizli = gizli if gizli is not None else os.environ.get("MEVZUAT_GIZLI_ANAHTAR", "")
+    anahtar, _, no = (kayit.dis_id or "").rpartition("@v")
+    if not (panel_adresi and gizli and kayit.degisiklikler and anahtar and no.isdigit()):
+        return None
+    return (f"{panel_adresi.rstrip('/')}/karsilastirma/{quote(anahtar, safe='')}/{no}"
+            f"?i={karsilastirma_imzasi(anahtar, int(no), gizli)}")
+
+
 # Fark parçasındaki «değişen kısım» işaretlerini mailde renkli gösterir: eski metinde silinen üstü çizili kırmızı,
 # yeni metinde eklenen kalın yeşil. Metin önce kaçışlanır, sadece kendi span'lerimiz HTML olur.
 _ISARETLI = re.compile(r"«([^«»]*)»")
@@ -84,6 +107,8 @@ class RaporKalemi:
     degisiklikler: list[dict] | None = None
     # Değişikliklerin tek satır özeti: "Madde 6 değişti; Ek Madde 1 eklendi" (surum.fark_ozeti).
     degisiklik_ozeti: str | None = None
+    # Değişikliklerin tamamı (girişsiz, imzalı sayfa), rapor_olustur doldurur.
+    karsilastirma_linki: str | None = None
     # "Neden önemli" satırları, [(konu, açıklama)], rapor_olustur doldurur.
     nedenler: list[tuple[str, str]] = field(default_factory=list)
     # Belgenin resmî kaynaktaki adresi (sadece http ve https), rapor_olustur doldurur.
@@ -437,6 +462,7 @@ def rapor_olustur(
     ek_onbellek: dict[str, bytes] | None = None,
     onay: dict | None = None,
     aciklamalar: dict[str, str] | None = None,
+    panel_adresi: str | None = None,
 ) -> Mail:
     """`onay` onaylayıcıya giden bildirim için verilir, içinde rapor_id ve link olur. Verilirse üste "onayınızı bekliyor" bandı eklenir.
     `aciklamalar` konu adından açıklamaya giden sözlüktür (konu_aciklamalari), "Neden size geldi" satırının altında gösterilir."""
@@ -447,6 +473,7 @@ def rapor_olustur(
     for kalem in kalemler:
         kalem.nedenler = neden_onemli(kalem.kayit, linksiz_aciklamalar)
         kalem.kaynak_linki = _belge_linki(kalem)["url"]
+        kalem.karsilastirma_linki = karsilastirma_linki(panel_adresi, kalem.kayit)
 
     ekler: list[Ek] = []
     eklenemeyen: list[dict] = []  # [{no, url}], maile sığmayan/indirilemeyen belge, yerine resmî kaynağın linki
@@ -543,6 +570,7 @@ def onay_bildirimi(
     Onay yine sadece panelden verilir."""
     mail = rapor_olustur(kayitlar, rapor.olusturuldu.date(), client, ek_ekle,
                          onay={"rapor_id": rapor.id, "link": panel_linki(panel_adresi, rapor.id)},
+                         panel_adresi=panel_adresi,
                          aciklamalar=aciklamalar)
     return replace(mail, konu=f"Onay bekliyor: {rapor.konu}", alicilar=alicilar)
 
@@ -741,9 +769,12 @@ def _gonderimi_yap(
     if anahtar not in mail_onbellek:
         try:
             secilen = [kayitlar[i] for i in gonderim.kayit_idler]
+            from mevzuat import panel_ayarlari
+
             mail_onbellek[anahtar] = rapor_olustur(secilen, rapor.olusturuldu.date(), client, ek_ekle,
                                                    sorumlu_notu=gonderim.notu, ek_onbellek=ek_onbellek,
-                                                   aciklamalar=konu_aciklamalari(session))
+                                                   aciklamalar=konu_aciklamalari(session),
+                                                   panel_adresi=panel_ayarlari.etkin(session).get("panel_adresi"))
         except Exception as e:
             log.exception("Dağıtım maili hazırlanamadı")
             gonderim.hata = f"Mail hazırlanamadı: {e!r}"

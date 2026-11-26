@@ -533,3 +533,45 @@ def test_degisim_denetimi_rg_aym_notu(session, konular):
     _calistir(session, site, konular, simdi=gun8 + timedelta(days=8))
     d = arsiv.degisim_denetimi(session, 7, gun8 + timedelta(days=8))[0]
     assert d["durum"] == "dogrulandi" and d["surum"] == 3 and any("33500" in n for n in d["yeni_rg_notlari"])
+
+
+# --- rapordan girişsiz tam karşılaştırma sayfası ----------------------------------------------------------
+
+def test_rapor_karsilastirma_linki_ve_sayfasi(konular, tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from sqlalchemy.pool import StaticPool
+
+    from mevzuat.web import uygulama_olustur
+
+    gizli = "g" * 40
+    monkeypatch.setenv("MEVZUAT_GIZLI_ANAHTAR", gizli)  # mail hazırlanırken bağlantı bununla imzalanır
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    init_db(engine)
+    with Session(engine) as s:
+        s.add(Calisma(id=1, baslangic=SIMDI, durum="CALISIYOR", ozet={}))
+        s.commit()
+        site = SahteMevzuatGov({KUYUM: KUYUM_HTML})
+        _calistir(s, site, konular)
+        # Kaynaktan gelen metinde HTML olsa da sayfada kaçışlanır.
+        site.metinler[KUYUM] = _degistir(KUYUM_HTML).replace("elektronik ortamda", "&lt;script&gt;x&lt;/script&gt; elektronik ortamda", 1)
+        _calistir(s, site, konular, simdi=SIMDI + timedelta(days=8))
+        kayit = s.scalar(select(Kayit))
+        link = rapor.karsilastirma_linki("https://panel.ornek", kayit, gizli)
+        assert link.startswith(f"https://panel.ornek/karsilastirma/{KUYUM}/2?i=")
+        assert rapor.karsilastirma_linki(None, kayit, gizli) is None  # panel adresi yoksa bağlantı yok
+        mail = rapor.rapor_olustur([kayit], EKIM_1, ek_ekle=False, panel_adresi="https://panel.ornek")
+    assert "Değişikliklerin tamamını gör" in mail.html and link.replace("&", "&amp;") in mail.html
+    assert f"Değişikliklerin tamamı: {link}" in mail.metin
+
+    c = TestClient(uygulama_olustur(engine, None, None, gizli, ek_ekle=False, arayuz=None))
+    yol = link.removeprefix("https://panel.ornek")
+    r = c.get(yol)  # oturum açmadan
+    assert r.status_code == 200 and "Kuyum Ticareti" in r.text
+    assert "<ins>" in r.text and "Madde 6" in r.text and "Ek Madde 1" in r.text
+    assert "<script>" not in r.text and "&lt;script&gt;" in r.text
+    assert "unsafe-inline" in r.headers["content-security-policy"] and "script-src" not in r.headers["content-security-policy"]
+    assert r.headers["x-robots-tag"].startswith("noindex")
+    # İmza başka sürüme/mevzuata taşınamaz, imzasız açılmaz.
+    assert c.get(yol.replace(f"/{KUYUM}/2", f"/{KUYUM}/1")).status_code == 404
+    assert c.get(yol.split("?")[0]).status_code == 404
+    assert c.get(yol[:-1] + ("0" if yol[-1] != "0" else "1")).status_code == 404

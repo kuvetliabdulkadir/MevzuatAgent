@@ -1722,6 +1722,22 @@ def uygulama_olustur(
     app.include_router(portal_yolu)
     app.include_router(api)
 
+    # --- rapor mailinden açılan tam karşılaştırma (girişsiz, imzalı bağlantı; web/karsilastirma.py)
+
+    @app.get("/karsilastirma/{anahtar}/{surum}", include_in_schema=False)
+    def karsilastirma_sayfasi(anahtar: str, surum: int, i: str = ""):
+        from mevzuat.web import karsilastirma
+
+        if not karsilastirma.imza_dogru(anahtar, surum, i, gizli_anahtar):
+            return HTMLResponse("<!doctype html><meta charset=utf-8><p>Bağlantı geçersiz.</p>", status_code=404,
+                                headers=karsilastirma.BASLIKLAR)
+        with Oturum() as db:
+            icerik = karsilastirma.sayfa(db, anahtar, surum)
+        if icerik is None:
+            return HTMLResponse("<!doctype html><meta charset=utf-8><p>Bu sürüm arşivde bulunamadı.</p>",
+                                status_code=404, headers=karsilastirma.BASLIKLAR)
+        return HTMLResponse(icerik, headers=karsilastirma.BASLIKLAR)
+
     # --- sağlık ve arayüz dosyaları
 
     # Sağlık kontrolü adresi (Docker "panel ayakta mı" diye buna bakıyor).
