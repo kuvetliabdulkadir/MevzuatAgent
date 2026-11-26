@@ -71,6 +71,16 @@
       <tr><td style="padding-top:16px;">
         <div style="font-size:12px;color:#6b6b63;">{{ k.no }} · {{ k.tur_adi }} · {{ k.kayit.yayin_tarihi.strftime("%d.%m.%Y") }}</div>
         <h3 style="margin:4px 0 10px;font-size:16px;line-height:1.4;">{{ k.kayit.baslik }}</h3>
+        {# Mevzuat hakkında: türü/RG, metnin kendi Amaç/Kapsam/Dayanak cümleleri, arşivdeki geçmişi. #}
+        {% if k.hakkinda %}
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 10px;font-size:13px;line-height:1.5;background:#f7f7f4;border:1px solid #e6e6e0;width:100%;">
+          <tr><td colspan="2" style="padding:6px 10px 0;font-size:11px;color:#6b6b63;text-transform:uppercase;letter-spacing:.5px;">Mevzuat hakkında</td></tr>
+          {% for ad, metin in k.hakkinda %}
+          <tr><td valign="top" style="padding:3px 10px;color:#6b6b63;white-space:nowrap;">{{ ad }}</td><td style="padding:3px 10px 3px 0;">{{ metin }}</td></tr>
+          {% endfor %}
+          <tr><td colspan="2" style="padding:0 0 4px;"></td></tr>
+        </table>
+        {% endif %}
 
         {# Metni değişen mevzuatta, madde madde eski/yeni. #}
         {% if k.degisiklikler %}
@@ -104,7 +114,7 @@
         <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:10px;font-size:13px;line-height:1.5;">
           {% if k.yururluk %}<tr><td valign="top" style="padding:2px 12px 2px 0;color:#6b6b63;white-space:nowrap;">Yürürlük</td><td style="padding:2px 0;">{{ k.yururluk }}</td></tr>{% endif %}
           <tr><td valign="top" style="padding:2px 12px 2px 0;color:#6b6b63;white-space:nowrap;">Etkilenen</td><td style="padding:2px 0;"><strong>{{ k.kayit.is_kollari|join(", ") }}</strong></td></tr>
-          <tr><td valign="top" style="padding:2px 12px 2px 0;color:#6b6b63;white-space:nowrap;">Neden size geldi</td><td style="padding:2px 0;">{% for konu, kelimeler in k.kayit.eslesmeler.items() %}{{ konu }} ({{ kelimeler|join(", ") }}){% if not loop.last %}; {% endif %}{% endfor %}</td></tr>
+          <tr><td valign="top" style="padding:2px 12px 2px 0;color:#6b6b63;white-space:nowrap;">Neden size geldi</td><td style="padding:2px 0;">{{ k.kayit.eslesmeler|neden_metni }}</td></tr>
           {# Konunun açıklaması, bu konu bizi neden ilgilendiriyor. #}
           {% for konu, aciklama in k.nedenler %}
           <tr><td valign="top" style="padding:2px 12px 2px 0;color:#6b6b63;white-space:nowrap;">{% if loop.first %}Neden önemli{% endif %}</td><td style="padding:2px 0;color:#3d3d38;">{% if k.kayit.eslesmeler|length > 1 %}<strong>{{ konu }}:</strong> {% endif %}{{ aciklama|replace("\n", "<br>"|safe) }}</td></tr>

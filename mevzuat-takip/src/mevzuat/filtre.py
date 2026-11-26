@@ -131,6 +131,22 @@ def hazirla(metin: str, konu: Konu | None = None) -> str:
     return _maskele(normal, konu.haric) if konu else normal
 
 
+# Bütün konulara ortak dışlama: bir üniversitenin kendi iç yönetmeliği (eğitim-öğretim, araştırma merkezi, akademik
+# kıyafet ...) hiçbir konuya girmez. Arşivde ilgili çıkanların hepsi böyleydi ("Altın ve Kıymetli Metal Çalışmaları
+# Uygulama ve Araştırma Merkezi", "Tüketici Sorunları Araştırma Merkezi"; 2026-11-26, kullanıcı istedi). Kural başlıktan,
+# siteye özel değil. Kanunlar (üniversite kuruluş kanunlarındaki vergi istisnaları) ve CB kararları kuralın dışında.
+_UNIVERSITE = re.compile(r"\büniversitesi\w*")
+_YONETMELIK = re.compile(r"\byönetmeli\w*")
+
+
+def genel_dislama(baslik: str) -> str | None:
+    """Başlık bütün konulardan dışlanıyorsa nedeni, değilse None."""
+    b = tr_kucuk(baslik or "")
+    if _UNIVERSITE.search(b) and _YONETMELIK.search(b):
+        return "üniversitenin iç yönetmeliği"
+    return None
+
+
 # Asıl eşleştirme burada. Metnin hangi konulara uyduğunu ve her konuda hangi kelimelerin geçtiğini bulur, örneğin Vergi konusunda ötv.
 def eslesmeler(metin: str, konular: list[Konu]) -> dict[str, list[str]]:
     """Her konu adı için metinde geçen anahtar kelimeleri döner. Eşleşme yoksa boş sözlük döner.
@@ -138,6 +154,8 @@ def eslesmeler(metin: str, konular: list[Konu]) -> dict[str, list[str]]:
     bitiyorsa başı tutması yeter. Ortak deyimler ve konunun hariç ifadeleri önce maskelenir. Dışlanan ifade geçerse
     (başlık düzeyinde, günlük taramada) konu eşleşmez; arşiv puanlamasında ise dışlanan ifade ceza puanıdır (puan.py)."""
     sonuc = {}
+    if genel_dislama(metin):
+        return sonuc
     for konu in konular:
         aranan = hazirla(metin, konu)
         # Dışlanan bir ifade geçiyorsa bu konuyu atla.

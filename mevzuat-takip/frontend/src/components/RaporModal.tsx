@@ -386,6 +386,18 @@ const KalemKarti: React.FC<{
       </div>
     )}
 
+    {/* Mevzuat hakkında: metnin kendi Amaç / Kapsam / Dayanak cümleleri, türü, arşivdeki geçmişi. */}
+    {k.hakkinda && k.hakkinda.length > 0 && (
+      <div className="bg-paper-100 border border-paper-200 rounded-sm p-2.5 space-y-1">
+        <p className="text-[11px] font-semibold text-stone-500 uppercase font-mono">Mevzuat hakkında</p>
+        {k.hakkinda.map((h) => (
+          <div key={h.ad} className="text-xs text-stone-800 grid grid-cols-[5.5rem_1fr] gap-2">
+            <span className="text-stone-500">{h.ad}</span><span className="[overflow-wrap:anywhere]">{h.metin}</span>
+          </div>
+        ))}
+      </div>
+    )}
+
     {/* Metni değişen mevzuatta, madde madde eski (kırmızı) ve yeni (yeşil) hali. */}
     {k.degisiklikler && (
       <div className="space-y-2">

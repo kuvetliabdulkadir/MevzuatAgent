@@ -960,3 +960,62 @@ def test_ek_gonderim_dogrulama_ve_durum(session):
     with pytest.raises(ValueError, match="Geçersiz"):
         rapor.ek_gonderim_planla(session, r, {k2.id}, None, set(), ["bozuk"])
     assert len(rapor.gonderimler(session, r)) == 1 and k2.haric
+
+
+# --- duyuru kalemleri (2026-11-26, sunucudaki gerçek GİB / MASAK / Borsa İstanbul duyuruları) ----------------------
+
+def test_numara_etiketindeki_iki_nokta_cumleyi_bolmez():
+    from mevzuat.rapor import ozet_cumlesi
+
+    metin = ("Vergi Usul Kanunu Genel Tebliği (Sıra No: 599) 24/11/2026 tarihli ve 33440 sayılı Resmi Gazete’de yayımlandı.\n"
+             "Söz konusu Tebliğe ulaşmak için\ntıklayınız.")
+    assert ozet_cumlesi(metin, "Vergi Usul Kanunu Genel Tebliği (Sıra No: 599) Resmi Gazete’de Yayımlandı").startswith(
+        "Vergi Usul Kanunu Genel Tebliği (Sıra No: 599) 24/11/2026")
+
+
+def test_duyuruda_sayfa_menusu_ve_tiklayiniz_ozet_olmaz():
+    from mevzuat.rapor import one_cikanlar, ozet_cumlesi
+
+    baslik = "Kıymetli Madenler ve Kıymetli Taşlar Piyasası (KMKTP) Prosedüründe 17. revizyon kapsamında yapılan değişikliklere ilişkin Duyuru"
+    metin = ("Borsa İstanbul Hakkında\nMevzuat\nOrganizasyon\nHukuki Çerçeve\nKurumsal Kimlik\nKütüphane\nBorsa İstanbul Kitap Listesi\n"
+             f"{baslik}\n23.11.2026\nKıymetli Madenler ve Kıymetli Taşlar Piyasası (KMKTP) Prosedüründe 17. revizyon kapsamında "
+             "yapılan değişikliklere ilişkin;\nTürkçe duyuru için\ntıklayınız\n.")
+    ozet = ozet_cumlesi(metin, baslik)
+    assert ozet is None or "Organizasyon" not in ozet
+    assert one_cikanlar(metin, {"Kuyum": ["kıymetli maden"]}, baslik=baslik) == []
+
+
+def test_neden_metni_kaynagin_tum_duyurularini_toplar():
+    from mevzuat.filtre import TUM_DUYURULAR
+    from mevzuat.rapor import neden_metni
+
+    e = {"MASAK": ["uyum görevlisi", "masak (içerikte)"], "Vergi": [TUM_DUYURULAR], "Kuyum": [TUM_DUYURULAR]}
+    assert neden_metni(e) == ("MASAK (uyum görevlisi, masak (içerikte)); "
+                              "kaynağın tüm duyuruları şu konulara da gider: Vergi, Kuyum")
+
+
+# --- "Mevzuat hakkında" (metnin kendi Amaç / Kapsam / Dayanak cümleleri, 2026-11-26) ----------------------------
+
+def test_mevzuat_hakkinda_amac_kapsam_dayanak():
+    from mevzuat.rapor import hakkinda_satirlari
+
+    metin = ("KUYUM TİCARETİ HAKKINDA YÖNETMELİK\nAmaç\nMADDE 1 – (1) Bu Yönetmeliğin amacı, kuyum ticaretine ilişkin usul ve "
+             "esasları düzenlemektir.\nKapsam\nMADDE 2 – (1) (Değişik:RG-29/4/2026-33238) Bu Yönetmelik, tacirlerin kuyum "
+             "ticareti faaliyetlerini kapsar.\nDayanak\nMADDE 3 – (1) Bu Yönetmelik, 6585 sayılı Kanunun 16 ncı maddesine "
+             "dayanılarak hazırlanmıştır.\nTanımlar\nMADDE 4 – (1) Bu Yönetmelikte geçen; a) Bakanlık: Ticaret Bakanlığını, "
+             "b) Kapsam dışı: … kapsamaz,\nifade eder.")
+    h = dict(hakkinda_satirlari(metin))
+    assert h["Amaç"] == "Bu Yönetmeliğin amacı, kuyum ticaretine ilişkin usul ve esasları düzenlemektir."
+    assert h["Kapsam"] == "Bu Yönetmelik, tacirlerin kuyum ticareti faaliyetlerini kapsar."  # baştaki not atıldı
+    assert h["Dayanak"].endswith("dayanılarak hazırlanmıştır.")
+    assert "1. madde" not in h
+
+
+def test_mevzuat_hakkinda_amacsiz_kanunda_birinci_madde():
+    from mevzuat.rapor import hakkinda_satirlari
+
+    metin = ("KATMA DEĞER VERGİSİ KANUNU\nVerginin konusu\nMadde 1 – Türkiye'de yapılan aşağıdaki işlemler katma değer "
+             "vergisine tabidir: 1. Ticari faaliyet çerçevesinde yapılan teslim ve hizmetler.\nMadde 2 – Teslim, bir mal "
+             "üzerindeki tasarruf hakkının devridir.")
+    assert hakkinda_satirlari(metin)[0][0] == "1. madde"
+    assert hakkinda_satirlari("Duyuru metni, madde yok.") == []

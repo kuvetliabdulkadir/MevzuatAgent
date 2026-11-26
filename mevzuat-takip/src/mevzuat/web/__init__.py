@@ -679,7 +679,7 @@ def uygulama_olustur(
                 raise HTTPException(404, "Rapor bulunamadı.")
             # Raporun kalemlerini hazırla.
             kayitlar = rapor_modulu.rapor_kayitlari(db, rapor)
-            kalemler = [rapor_modulu._kalem(i, k) for i, k in enumerate(kayitlar, start=1)]
+            kalemler = [rapor_modulu._kalem(i, k, db) for i, k in enumerate(kayitlar, start=1)]
             no = {k.kayit.id: k.no for k in kalemler}
             aciklamalar = rapor_modulu.konu_aciklamalari(db)
             # Onay öncesi, her kalem şu anki gruplara göre kime gidecek. Onaydan sonra, dondurulmuş gönderimler.
@@ -697,6 +697,7 @@ def uygulama_olustur(
                     "one_cikanlar": k.one_cikanlar, "metin": k.metin, "kisaltildi": k.kisaltildi, "ocr": k.ocr,
                     "okunamadi": k.kayit.icerik_durumu in ("OCR_GEREKLI", "HATA"),
                     "degisiklikler": k.degisiklikler, "degisiklik_ozeti": k.degisiklik_ozeti, "kaynakca": k.kaynakca,
+                    "hakkinda": [{"ad": ad, "metin": metin} for ad, metin in k.hakkinda],
                     # Arşivle bağlı "güncel metni değişti" kalemi: panel arşivdeki tam karşılaştırmayı açar.
                     "arsiv_surumu": _arsiv_surumu(k.kayit), "haric": k.kayit.haric,
                     # Onaylayıcı belgenin aslına baksın diye resmî adres, sadece http ve https.

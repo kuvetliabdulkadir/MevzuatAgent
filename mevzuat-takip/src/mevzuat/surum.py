@@ -56,7 +56,7 @@ from mevzuat.db import (
     Kayit,
     SistemAyari,
 )
-from mevzuat.filtre import Konu, eslesmeler, is_kollari
+from mevzuat.filtre import Konu, eslesmeler, genel_dislama, is_kollari
 from mevzuat.icerik import html_metni
 
 log = logging.getLogger(__name__)
@@ -439,6 +439,9 @@ def _degisiklik_kaydi(
     from mevzuat import pipeline
 
     eslesen = pipeline.icerikle_eslesmeler("", icerik, konular, eslesen, agirlik, ek="(değişiklikte)")
+    # Bütün konulardan dışlanan mevzuat (üniversite iç yönetmeliği) değişince rapora girmez; takipteyse girer.
+    if izlenen is None and genel_dislama(ad):
+        return None
     if not eslesen and izlenen is None:
         return None
     kayit = Kayit(

@@ -1,6 +1,7 @@
 """Faz 2 (arşivde arama) ve Faz 3 (konu filtresi: Türkçe ek kuralı, ortak deyimler, puanlama, arşive uygulama)."""
 
 from datetime import datetime, time, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -223,3 +224,22 @@ def test_panel_arama_ve_konu_uclari(engine):
     k = c.get("/panel/api/arsiv/konular").json()
     assert k["konular"] == [{"ad": KUYUM.ad, "ilgili": 1}] and k["guncel"] and k["toplam_ilgili"] == 1
     assert c.get("/panel/api/arsiv/liste", params={"konu": "*"}).json()["toplam"] == 1
+
+
+# --- bütün konulara ortak dışlama: üniversitenin iç yönetmeliği (2026-11-26) ---------------------------------
+
+def test_universite_ic_yonetmeligi_hicbir_konuya_girmez():
+    from mevzuat import filtre, puan
+    from mevzuat.filtre import konulari_yukle
+
+    konular = konulari_yukle(Path(__file__).parents[1] / "config" / "konular.toml")
+    baslik = "İSTANBUL ŞEHİR ÜNİVERSİTESİ ALTIN VE KIYMETLİ METAL ÇALIŞMALARI UYGULAMA VE ARAŞTIRMA MERKEZİ YÖNETMELİĞİ"
+    metin = "MADDE 1 – (1) Bu Yönetmeliğin amacı; altın ve kıymetli maden, kuyum ve kuyumculuk çalışmalarıdır. " * 5
+    assert filtre.genel_dislama(baslik) and filtre.eslesmeler(baslik, konular) == {}
+    assert puan.ilgili_konular(baslik, metin, konular) == []
+    # Üniversite kuruluş kanunu ve üniversite adı geçmeyen yönetmelik kuralın dışında.
+    assert not filtre.genel_dislama("TÜRK-JAPON BİLİM VE TEKNOLOJİ ÜNİVERSİTESİNİN KURULUŞU HAKKINDA KANUN")
+    assert not filtre.genel_dislama("Kuyum Ticareti Hakkında Yönetmelik")
+    assert filtre.eslesmeler("Kuyum Ticareti Hakkında Yönetmelik", konular)
+    # Küçük harf ve ek: "Üniversitesinin … yönetmeliğinde değişiklik" de dışlanır.
+    assert filtre.genel_dislama("Akdeniz Üniversitesinin Lisans Yönetmeliğinde Değişiklik Yapılmasına Dair Yönetmelik")

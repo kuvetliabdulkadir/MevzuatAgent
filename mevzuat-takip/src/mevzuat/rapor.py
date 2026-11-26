@@ -19,7 +19,7 @@ import httpx
 # Jinja2, mail şablonlarını (sablonlar/rapor.html.j2) doldurmak için şablon motoru.
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup, escape
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from mevzuat import alicilar, surum
@@ -70,6 +70,21 @@ def karsilastirma_linki(panel_adresi: str | None, kayit: Kayit, gizli: str | Non
             f"?i={karsilastirma_imzasi(anahtar, int(no), gizli)}")
 
 
+# "Neden size geldi" satırı. Kelimesi bulunan konular "Konu (kelime, kelime)"; sadece kaynağın ayarı yüzünden gelen
+# konular sona tek parça yazılır ("kaynağın tüm duyuruları: A, B, C"), MASAK kaleminde 7 kez tekrar etmesin.
+def neden_metni(eslesmeler: dict[str, list[str]]) -> str:
+    kelimeli, ayardan = [], []
+    for konu, kelimeler in (eslesmeler or {}).items():
+        gercek = [k for k in kelimeler if k != TUM_DUYURULAR]
+        if gercek:
+            kelimeli.append(f"{konu} ({', '.join(gercek)})")
+        else:
+            ayardan.append(konu)
+    if ayardan:
+        kelimeli.append(f"kaynağın tüm duyuruları şu konulara da gider: {', '.join(ayardan)}")
+    return "; ".join(kelimeli)
+
+
 # Fark parçasındaki «değişen kısım» işaretlerini mailde renkli gösterir: eski metinde silinen üstü çizili kırmızı,
 # yeni metinde eklenen kalın yeşil. Metin önce kaçışlanır, sadece kendi span'lerimiz HTML olur.
 _ISARETLI = re.compile(r"«([^«»]*)»")
@@ -86,6 +101,7 @@ def _vurgula(metin: str | None, taraf: str) -> Markup:
 
 
 _sablonlar.filters["vurgula"] = _vurgula
+_sablonlar.filters["neden_metni"] = lambda e: neden_metni(e)
 
 
 # Rapordaki tek bir kalem (bir belge) için hazırlanmış her şey.
@@ -109,6 +125,8 @@ class RaporKalemi:
     degisiklik_ozeti: str | None = None
     # Değişikliklerin tamamı (girişsiz, imzalı sayfa), rapor_olustur doldurur.
     karsilastirma_linki: str | None = None
+    # "Mevzuat hakkında" satırları [(etiket, metin)]: tür/RG, Amaç, Kapsam, Dayanak, arşivdeki geçmişi (hakkinda_satirlari).
+    hakkinda: list[tuple[str, str]] = field(default_factory=list)
     # "Neden önemli" satırları, [(konu, açıklama)], rapor_olustur doldurur.
     nedenler: list[tuple[str, str]] = field(default_factory=list)
     # Belgenin resmî kaynaktaki adresi (sadece http ve https), rapor_olustur doldurur.
@@ -145,7 +163,8 @@ def _cumleler(metin: str) -> list[str]:
     # satırları birleştir, sonra noktalama ve "MADDE n" başlangıçlarından böl.
     duz = re.sub(r"\s+", " ", metin)
     # Kalıptaki geriye bakma kısmı, "G.T.İ.P." gibi tek harfli kısaltmalardaki noktada bölmeyi engeller.
-    parcalar = re.split(r"(?<=[.;:])(?<!\b\w\.)\s+|\s+(?=MADDE \d)", duz)
+    # "(Sıra No: 599)", "Sayı: 12" gibi numara etiketlerindeki iki nokta da cümle sonu değildir (GİB, MASAK duyuruları).
+    parcalar = re.split(r"(?<=[.;:])(?<!\b\w\.)(?<![Nn]o:)(?<![Ss]ayı:)\s+(?!\d)|\s+(?=MADDE \d)", duz)
     return [c.strip() for c in parcalar if c.strip()]
 
 
@@ -205,10 +224,90 @@ def ozet_cumlesi(metin: str, baslik: str) -> str | None:
     if madde1:
         ilk_cumle = re.split(r"(?<=\.)(?<!\b\w\.)\s+", madde1, maxsplit=1)[0]
         return _kisalt(ilk_cumle) if len(ilk_cumle) > 20 else None
-    for c in _cumleler(metin):
-        if len(c) >= 40 and not _basliga_benziyor(c, baslik):
+    for c in _cumleler(_basliktan_sonrasi(metin, baslik)):
+        if len(c) >= 40 and not _basliga_benziyor(c, baslik) and not _baglanti_cumlesi(c):
             return _kisalt(c)
     return None
+
+
+# Sayfadan alınan duyuru metni çoğu zaman sitenin menüsüyle başlar ("Hakkında Mevzuat Organizasyon …"), duyurunun
+# kendisi başlığın sayfada tekrarlandığı yerden sonra gelir (Borsa İstanbul, 2026-11-26). Başlık metinde geçiyorsa
+# özet ve öne çıkan cümleler ondan sonrasında aranır; geçmiyorsa metin olduğu gibi. Kural siteye özel değil.
+def _basliktan_sonrasi(metin: str, baslik: str) -> str:
+    duz, b = " ".join(metin.split()), " ".join((baslik or "").split())
+    if len(b) < 20:
+        return metin
+    yer = tr_kucuk(duz).find(tr_kucuk(b))
+    return duz[yer + len(b):] if yer > 0 else metin
+
+
+# "Tebliğe ulaşmak için tıklayınız." gibi bağlantı cümleleri özet ya da kanıt olmaz.
+def _baglanti_cumlesi(cumle: str) -> bool:
+    return bool(re.search(r"t[ıi]klay[ıi]n", tr_kucuk(cumle)))
+
+
+# "Mevzuat hakkında": metnin kendi Amaç, Kapsam ve Dayanak maddelerinin ilk cümlesi, birebir (yorum yok). Bunlar
+# çoğu yönetmelik ve tebliğde ilk üç-dört maddededir; kanunlarda çoğu zaman sadece Amaç ya da Kapsam vardır.
+_HAKKINDA = (
+    ("Amaç", re.compile(r"\bamac[ıi]\b")),
+    ("Kapsam", re.compile(r"\bkapsar\b|\bkapsamaz\b|\bkapsamaktad[ıi]r\b")),
+    ("Dayanak", re.compile(r"\bdayan[ıi]larak\b|\bdayanmaktad[ıi]r\b")),
+)
+# Madde başındaki "(Değişik:RG-1/8/2025-32973)", "(Ek: …)" notları ve "(1)" fıkra numarası özet satırına girmez.
+_MADDE_BASI_NOTU = re.compile(r"^(?:\s*\((?:Değişik|Ek|Mülga)[^)]*\)|\s*\(\d+\)|\s*\[\d+\])+\s*", re.IGNORECASE)
+
+
+def hakkinda_satirlari(metin: str | None, ilk_madde: int = 6) -> list[tuple[str, str]]:
+    """Maddeler surum.bolumler ile bulunur (MADDE/Madde, Ek/Geçici, bütün yazımlar). "amacı" cümlenin başında aranır,
+    "kapsar" ve "dayanılarak hazırlanmıştır" sonda (Türkçede fiil sonda). Tanımlar maddesi ("Bu Tebliğde geçen;") hiçbiri
+    sayılmaz."""
+    bolumler_ = surum.bolumler(metin or "")
+    sonuc, gorulen = [], set()
+    for no in range(1, ilk_madde + 1):
+        govde = bolumler_.get(f"Madde {no}")
+        if not govde:
+            continue
+        govde = _MADDE_BASI_NOTU.sub("", MADDE_ONEKI.sub("", re.sub(r"^madde", "MADDE", govde, flags=re.IGNORECASE)))
+        ilk_cumle = re.split(r"(?<=\.)(?<!\b\w\.)\s+", govde, maxsplit=1)[0].strip()
+        bas, tum = tr_kucuk(ilk_cumle[:160]), tr_kucuk(ilk_cumle)
+        if " geçen" in bas[:80] or bas.startswith("bu kanunun uygulanmasında"):
+            continue  # tanımlar
+        for ad, kalip in _HAKKINDA:
+            if ad not in gorulen and kalip.search(bas if ad == "Amaç" else tum):
+                gorulen.add(ad)
+                sonuc.append((ad, _kisalt(ilk_cumle, 450)))
+                break
+    # Amaç ve Kapsam maddesi olmayan metin (ÖTV, KDV Kanunu "verginin konusu"; torba kanunlar): 1. maddenin ilk cümlesi.
+    if not gorulen & {"Amaç", "Kapsam"} and (madde1 := bolumler_.get("Madde 1")):
+        govde = _MADDE_BASI_NOTU.sub("", MADDE_ONEKI.sub("", re.sub(r"^madde", "MADDE", madde1, flags=re.IGNORECASE)))
+        ilk_cumle = re.split(r"(?<=\.)(?<!\b\w\.)\s+", govde, maxsplit=1)[0].strip()
+        if len(ilk_cumle) >= 30:
+            sonuc.insert(0, ("1. madde", _kisalt(ilk_cumle, 450)))
+    return sonuc
+
+
+# Değişen mevzuat kaleminin "Mevzuat hakkında" satırları, arşivden: türü ve RG'si, yeni sürümün Amaç/Kapsam/Dayanak'ı,
+# arşivdeki geçmişi. Kayıt arşivle bağlı değilse (eski "anahtar@id" kayıtları) boş.
+def degisen_mevzuat_hakkinda(session: Session, kayit: Kayit) -> list[tuple[str, str]]:
+    from mevzuat.arsiv import TURLER
+    from mevzuat.db import ArsivMevzuat, ArsivSurumu
+
+    anahtar, _, no = (kayit.dis_id or "").rpartition("@v")
+    if not (anahtar and no.isdigit()):
+        return []
+    m = session.get(ArsivMevzuat, anahtar)
+    s = session.scalar(select(ArsivSurumu).where(ArsivSurumu.anahtar == anahtar, ArsivSurumu.surum_no == int(no)))
+    if m is None or s is None:
+        return []
+    rg = f" · Resmî Gazete {m.rg_tarihi:%d.%m.%Y}" + (f" / {m.rg_sayisi}" if m.rg_sayisi else "") if m.rg_tarihi else ""
+    satirlar = [("Mevzuat", f"{TURLER.get(m.tur, m.tur)}{rg} · {m.anahtar}")]
+    satirlar += hakkinda_satirlari(s.metin)
+    ilk = session.scalar(select(ArsivSurumu.cekildi).where(ArsivSurumu.anahtar == anahtar)
+                         .order_by(ArsivSurumu.surum_no).limit(1))
+    kez = session.scalar(select(func.count()).select_from(ArsivSurumu).where(
+        ArsivSurumu.anahtar == anahtar, ArsivSurumu.surum_turu == "degisiklik", ArsivSurumu.surum_no <= int(no))) or 0
+    satirlar.append(("Arşivde", f"v{no}; arşive ilk alınışı {ilk:%d.%m.%Y}, o zamandan beri {kez} kez değişti"))
+    return satirlar
 
 
 # MADDE 1 "aşağıdaki tabloda" diyorsa tablonun satırlarını çıkarır (ör. ÖTV tutarları).
@@ -340,8 +439,11 @@ def _madde_oneksiz(cumle: str) -> str:
 
 
 # "Neden size geldi", metinde eşleşen anahtar kelimelerin geçtiği cümleler.
-def one_cikanlar(metin: str, eslesmeler: dict[str, list[str]], haric: tuple[str, ...] = ()) -> list[str]:
-    """İçerikte eşleşen kelimelerin geçtiği cümleler ("neden size geldi" kanıtı)."""
+def one_cikanlar(metin: str, eslesmeler: dict[str, list[str]], haric: tuple[str, ...] = (), baslik: str = "") -> list[str]:
+    """İçerikte eşleşen kelimelerin geçtiği cümleler ("neden size geldi" kanıtı). `baslik` verilirse sayfa menüsü
+    (başlıktan önceki kısım) ve başlığın tekrarı olan cümleler atlanır."""
+    if baslik:
+        metin = _basliktan_sonrasi(metin, baslik)
     # Eşleşen kelimeler (sonundaki "(içerikte)" eki olmadan, parantezle başlayan açıklamalar hariç).
     kelimeler = {
         tr_kucuk(k.removesuffix(" (içerikte)"))
@@ -351,8 +453,8 @@ def one_cikanlar(metin: str, eslesmeler: dict[str, list[str]], haric: tuple[str,
     }
     sonuc = []
     for cumle in _cumleler(metin):
-        # Çok kısa ya da zaten eklenmiş cümleyi atla.
-        if len(cumle) < 20 or cumle in sonuc:
+        # Çok kısa, zaten eklenmiş ya da "… için tıklayınız" cümlesini atla.
+        if len(cumle) < 20 or cumle in sonuc or _baglanti_cumlesi(cumle) or (baslik and _basliga_benziyor(cumle, baslik)):
             continue
         if any(_madde_oneksiz(cumle).startswith(h.rstrip("…")[:60]) for h in haric if h):
             continue  # özetle aynı cümle
@@ -378,7 +480,7 @@ def linksiz(metin: str) -> str:
 
 
 # Bir kaydı rapor kalemine çevirir, özet, tablo, yürürlük, öne çıkanlar...
-def _kalem(no: int, kayit: Kayit) -> RaporKalemi:
+def _kalem(no: int, kayit: Kayit, session: Session | None = None) -> RaporKalemi:
     # Metni değişen mevzuat kalemi, özet/tablo yerine eski/yeni farkları gösterilir.
     if kayit.degisiklikler:
         # Metin zaten fark özeti, "MADDE 1'in ilk cümlesi" gibi çıkarımlar burada anlamsız.
@@ -389,6 +491,7 @@ def _kalem(no: int, kayit: Kayit) -> RaporKalemi:
                             "cikan": [linksiz(x) for x in d.get("cikan") or []],
                             "giren": [linksiz(x) for x in d.get("giren") or []]} for d in kayit.degisiklikler],
             degisiklik_ozeti=surum.fark_ozeti(kayit.degisiklikler),
+            hakkinda=degisen_mevzuat_hakkinda(session, kayit) if session is not None else [],
         )
     # Metni temizle (adresleri sil, fazla boş satırları azalt).
     metin = linksiz((kayit.icerik or "").replace("\r\n", "\n").strip())
@@ -396,7 +499,7 @@ def _kalem(no: int, kayit: Kayit) -> RaporKalemi:
     # Özet cümlesi ve (özetle aynı olmayan, başlığı tekrarlamayan) en fazla 2 öne çıkan cümle.
     ozet = ozet_cumlesi(metin, kayit.baslik) if metin else None
     one_cikan = [
-        c for c in (one_cikanlar(metin, kayit.eslesmeler, haric=(ozet or "",)) if metin else [])
+        c for c in (one_cikanlar(metin, kayit.eslesmeler, haric=(ozet or "",), baslik=kayit.baslik) if metin else [])
         if not _basliga_benziyor(c, kayit.baslik)
     ][:2]
     return RaporKalemi(
@@ -411,6 +514,8 @@ def _kalem(no: int, kayit: Kayit) -> RaporKalemi:
         metin=metin[:OZET_UZUNLUGU] if metin else None,
         kisaltildi=bool(metin and len(metin) > OZET_UZUNLUGU),
         ocr=kayit.icerik_durumu == "OCR_ILE_OKUNDU",
+        # Özet zaten MADDE 1'in ilk cümlesi (çoğu zaman Amaç); aynı cümle iki kez yazılmaz.
+        hakkinda=[(ad, c) for ad, c in hakkinda_satirlari(metin) if not (ozet and c.startswith(ozet[:60]))] if metin else [],
     )
 
 
@@ -463,11 +568,12 @@ def rapor_olustur(
     onay: dict | None = None,
     aciklamalar: dict[str, str] | None = None,
     panel_adresi: str | None = None,
+    session: Session | None = None,
 ) -> Mail:
     """`onay` onaylayıcıya giden bildirim için verilir, içinde rapor_id ve link olur. Verilirse üste "onayınızı bekliyor" bandı eklenir.
     `aciklamalar` konu adından açıklamaya giden sözlüktür (konu_aciklamalari), "Neden size geldi" satırının altında gösterilir."""
     # Her kaydı numaralı kaleme çevir.
-    kalemler = [_kalem(i, k) for i, k in enumerate(kayitlar, start=1)]
+    kalemler = [_kalem(i, k, session) for i, k in enumerate(kayitlar, start=1)]
     # Mailde link olmaz kuralı açıklamaya da uygulanır.
     linksiz_aciklamalar = {ad: linksiz(a) for ad, a in (aciklamalar or {}).items()}
     for kalem in kalemler:
@@ -564,13 +670,14 @@ def onay_bildirimi(
     client: httpx.Client | None = None,
     ek_ekle: bool = True,
     aciklamalar: dict[str, str] | None = None,
+    session: Session | None = None,
 ) -> Mail:
     """Onaylayıcıya giden bildirim. İçerik raporun dağıtılacak hâliyle aynıdır, PDF belgeler de eklenir, böylece onaylayıcı ne
     onayladığını belgelerin kendisinden de görür. Üstte "onayınızı bekliyor" bandı ve panel düğmesi olur.
     Onay yine sadece panelden verilir."""
     mail = rapor_olustur(kayitlar, rapor.olusturuldu.date(), client, ek_ekle,
                          onay={"rapor_id": rapor.id, "link": panel_linki(panel_adresi, rapor.id)},
-                         panel_adresi=panel_adresi,
+                         panel_adresi=panel_adresi, session=session,
                          aciklamalar=aciklamalar)
     return replace(mail, konu=f"Onay bekliyor: {rapor.konu}", alicilar=alicilar)
 
@@ -612,7 +719,7 @@ def onaya_sun(
     else:
         try:
             gonderici.gonder(onay_bildirimi(rapor, kayitlar, onaylayicilar, panel_adresi, client, ek_ekle,
-                                            konu_aciklamalari(session)))
+                                            konu_aciklamalari(session), session))
         except Exception as e:
             log.exception("Onay bildirimi gönderilemedi")
             rapor.hata = f"Onay bildirimi gönderilemedi: {e!r}"
@@ -774,7 +881,8 @@ def _gonderimi_yap(
             mail_onbellek[anahtar] = rapor_olustur(secilen, rapor.olusturuldu.date(), client, ek_ekle,
                                                    sorumlu_notu=gonderim.notu, ek_onbellek=ek_onbellek,
                                                    aciklamalar=konu_aciklamalari(session),
-                                                   panel_adresi=panel_ayarlari.etkin(session).get("panel_adresi"))
+                                                   panel_adresi=panel_ayarlari.etkin(session).get("panel_adresi"),
+                                                   session=session)
         except Exception as e:
             log.exception("Dağıtım maili hazırlanamadı")
             gonderim.hata = f"Mail hazırlanamadı: {e!r}"

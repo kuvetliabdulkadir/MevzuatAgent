@@ -38,6 +38,13 @@ Rakam, liste numarası ve kişi/kuruluş adlarında hata olabilir. Ekteki orijin
 {{ k.no }}. {{ k.kayit.baslik }}
 {{ k.tur_adi }} · {{ k.kayit.yayin_tarihi.strftime("%d.%m.%Y") }}
 
+{% if k.hakkinda %}
+Mevzuat hakkında:
+{% for ad, metin in k.hakkinda %}
+  {{ ad }}: {{ metin }}
+{% endfor %}
+
+{% endif %}
 {% if k.degisiklikler %}
 {% if k.degisiklik_ozeti %}Özet: {{ k.degisiklik_ozeti }}
 {% endif %}
@@ -77,7 +84,7 @@ Belgenin içeriği alınamadı. Kaynakçadaki bilgilerle belgeye ulaşın.
 Yürürlük: {{ k.yururluk }}
 {% endif %}
 Etkilenen: {{ k.kayit.is_kollari|join(", ") }}
-Neden size geldi: {% for konu, kelimeler in k.kayit.eslesmeler.items() %}{{ konu }} ({{ kelimeler|join(", ") }}){% if not loop.last %}; {% endif %}{% endfor %}
+Neden size geldi: {{ k.kayit.eslesmeler|neden_metni }}{% if true %}{% endif %}
 {# Satır sonu döngünün içinde, açıklama yoksa çıktı eskisiyle birebir aynı kalır. #}
 {% for konu, aciklama in k.nedenler %}
 

@@ -198,7 +198,7 @@ def onizle_komutu(args: argparse.Namespace) -> None:
             print("Onaya sunulmamış ilgili kayıt yok.")
             return
         mail = rapor.rapor_olustur(kayitlar, date.today(), client, ek_ekle,
-                                   aciklamalar=rapor.konu_aciklamalari(session))
+                                   aciklamalar=rapor.konu_aciklamalari(session), session=session)
         Path("rapor_onizleme.html").write_text(mail.html, encoding="utf-8")
         Path("rapor_onizleme.txt").write_text(mail.metin, encoding="utf-8")
         print(mail.konu)

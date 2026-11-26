@@ -243,7 +243,7 @@ def konulari_uygula(session: Session, konular: list[Konu], anahtar: str | None =
 
 # --- konu değişikliği takibi -------------------------------------------------------------------------------------
 
-FILTRE_SURUMU = 2  # puanlama kuralı değişince artırılır, arşiv yeniden filtrelenir
+FILTRE_SURUMU = 3  # puanlama kuralı değişince artırılır, arşiv yeniden filtrelenir (3: üniversite iç yönetmelikleri)
 IMZA_ANAHTARI = "arsiv_filtre_imzasi"
 
 

@@ -27,7 +27,7 @@ import re
 from dataclasses import dataclass, field
 
 from mevzuat import turkce_ek
-from mevzuat.filtre import Konu, _maskele, hazirla
+from mevzuat.filtre import Konu, _maskele, genel_dislama, hazirla
 from mevzuat.surum import bolumler
 
 ESIK = 10.0
@@ -205,6 +205,9 @@ def puanla_hazir(belge: Belge, konu: Konu, esik: float = ESIK, agirlik: dict[str
     amac_var = g.amac_gecis >= AMAC_EN_AZ_GECIS or sum(g.amac_kelime.values()) >= AMAC_EN_AZ_KELIME
     bonus = AMAC_BONUSU if amac_var else 0.0
     ceza = DISLANAN_CEZASI if any(d in b_norm for d in konu.dislanan) else 0.0
+    # Bütün konulara ortak dışlama (filtre.genel_dislama): puan ne olursa olsun ilgili değil.
+    if genel_dislama(belge.baslik):
+        ceza = max(ceza, 10_000.0)
     puan = round(baslik_puani + yogunluk_puani + yayilma_puani + bonus - ceza, 2)
     return Puan(konu.ad, puan, puan >= esik, kanitlar, {
         "baslik": baslik_puani, "yogunluk": round(yogunluk_puani, 2), "yayilma": round(yayilma_puani, 2), "amac": bonus,

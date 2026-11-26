@@ -75,7 +75,8 @@ export interface Kalem {
   okunamadi: boolean;
   degisiklikler: Degisiklik[] | null;
   degisiklik_ozeti?: string | null; // "Madde 6 değişti; Ek Madde 1 eklendi"
-  arsiv_surumu?: { anahtar: string; surum: number } | null; // arşivdeki yeni sürüm (tam karşılaştırma için)
+  arsiv_surumu?: { anahtar: string; surum: number } | null;
+  hakkinda?: { ad: string; metin: string }[]; // "Mevzuat hakkında": tür/RG, Amaç, Kapsam, Dayanak, arşivdeki geçmişi // arşivdeki yeni sürüm (tam karşılaştırma için)
   kaynakca: string;
   url: string | null; // belgenin resmî adresi
   nedenler: { konu: string; aciklama: string }[]; // eşleşen konuların açıklamaları
