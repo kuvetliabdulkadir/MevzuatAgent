@@ -454,3 +454,34 @@ def test_pdfli_yeni_yayin_ertesi_gun_de_cekilmez(session, konular):
     _calistir(session, site, konular, simdi=SIMDI + timedelta(days=1))
     assert not any("/MevzuatMetin/" in u for u in site.istekler)
     assert session.get(ArsivMevzuat, "20.5.11822").durum == "BEKLIYOR"
+
+
+# --- arşiv listesinde sürüm süzgeci ve rapordan arşive geçiş -------------------------------------------
+
+def test_arsiv_listesi_surum_suzgeci(session, konular):
+    site = SahteMevzuatGov({KUYUM: KUYUM_HTML, "1.5.4760": _sade()})
+    _calistir(session, site, konular)
+    site.metinler[KUYUM] = _degistir(KUYUM_HTML)
+    _calistir(session, site, konular, simdi=SIMDI + timedelta(days=8))
+    anahtarlar = lambda **kw: [r["anahtar"] for r in arsiv.liste(session, simdi=SIMDI + timedelta(days=8), **kw)["satirlar"]]
+    assert anahtarlar(surum="degisen") == [KUYUM]
+    assert anahtarlar(surum="son7") == [KUYUM]
+    assert KUYUM not in anahtarlar(surum="v1") and "1.5.4760" in anahtarlar(surum="v1")
+    assert anahtarlar(surum="v3") == []
+    satir = arsiv.liste(session, surum="degisen")["satirlar"][0]
+    assert satir["degisiklik_sayisi"] == 1 and satir["son_degisiklik"].startswith("2026-10-09")
+    assert arsiv.liste(session, simdi=SIMDI + timedelta(days=60), surum="son30")["toplam"] == 0
+    with pytest.raises(ValueError):
+        arsiv.liste(session, surum="v9")
+
+
+def test_rapor_kalemi_arsiv_surumunu_verir(session, konular):
+    from mevzuat.web import _arsiv_surumu
+
+    site = SahteMevzuatGov({KUYUM: KUYUM_HTML})
+    _calistir(session, site, konular)
+    site.metinler[KUYUM] = _degistir(KUYUM_HTML)
+    _calistir(session, site, konular, simdi=SIMDI + timedelta(days=8))
+    assert _arsiv_surumu(session.scalar(select(Kayit))) == {"anahtar": KUYUM, "surum": 2}
+    eski = Kayit(kaynak="mevzuat_gov", dis_id=f"{KUYUM}@17", degisiklikler=[{"bolum": "Madde 1"}])
+    assert _arsiv_surumu(eski) is None  # arşivden önceki (metin_surumleri) kayıt

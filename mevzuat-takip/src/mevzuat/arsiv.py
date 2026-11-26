@@ -718,10 +718,34 @@ def _tr_buyuk(metin: str) -> str:
 
 
 # Arşiv listesi, arama ve süzme ile, sayfa sayfa.
+# Listede sürüm süzgeci (panel): gerçek değişiklik sürümleri sayılır, okuma düzeltmesi sayılmaz.
+SURUM_SUZGECLERI = ("v1", "degisen", "v3", "son7", "son30")
+
+
+def _degisiklikler_sorgusu():
+    """Mevzuat başına gerçek değişiklik sürümü sayısı ve son değişiklik zamanı (surum_turu = degisiklik)."""
+    return (select(ArsivSurumu.anahtar, func.count().label("sayi"), func.max(ArsivSurumu.cekildi).label("son"))
+            .where(ArsivSurumu.surum_turu == "degisiklik").group_by(ArsivSurumu.anahtar).subquery())
+
+
 def liste(session: Session, ara: str = "", tur: str = "", durum: str = "", sayfa: int = 1, boyut: int = 50,
-          konu: str = "") -> dict:
-    """`konu` verilirse sadece o konuyla ilgili olanlar; "*" ise herhangi bir konuyla ilgili olanlar (Faz 3)."""
+          konu: str = "", surum: str = "", simdi: datetime | None = None) -> dict:
+    """`konu` verilirse sadece o konuyla ilgili olanlar; "*" ise herhangi bir konuyla ilgili olanlar (Faz 3).
+    `surum`: v1 (hiç değişmemiş, sadece ilk sürüm), degisen (en az bir değişiklik, v2 ve sonrası), v3 (en az iki
+    değişiklik), son7 / son30 (son 7 / 30 günde değişen). Değişenler son değişikliğe göre yeniden eskiye sıralanır."""
+    if surum and surum not in SURUM_SUZGECLERI:
+        raise ValueError(f"Bilinmeyen sürüm süzgeci: {surum}")
+    simdi = simdi or datetime.now()
+    d = _degisiklikler_sorgusu()
     q = select(ArsivMevzuat)
+    if surum == "v1":
+        q = q.where(ArsivMevzuat.surum_sayisi > 0, ArsivMevzuat.anahtar.not_in(select(d.c.anahtar)))
+    elif surum:
+        q = q.join(d, d.c.anahtar == ArsivMevzuat.anahtar)
+        if surum == "v3":
+            q = q.where(d.c.sayi >= 2)
+        elif surum in ("son7", "son30"):
+            q = q.where(d.c.son >= simdi - timedelta(days=7 if surum == "son7" else 30))
     if konu:
         ilgili = select(ArsivKonu.anahtar).where(ArsivKonu.ilgili.is_(True))
         if konu != "*":
@@ -743,15 +767,20 @@ def liste(session: Session, ara: str = "", tur: str = "", durum: str = "", sayfa
         q = q.where(ArsivMevzuat.durum == durum)
     toplam = session.scalar(select(func.count()).select_from(q.subquery())) or 0
     sayfa, boyut = max(1, sayfa), min(max(1, boyut), 200)
-    satirlar = session.scalars(q.order_by(ArsivMevzuat.rg_tarihi.desc().nulls_last(), ArsivMevzuat.anahtar)
-                               .offset((sayfa - 1) * boyut).limit(boyut))
-    satirlar = list(satirlar)
+    sira = (ArsivMevzuat.rg_tarihi.desc().nulls_last(), ArsivMevzuat.anahtar)
+    if surum and surum != "v1":
+        sira = (d.c.son.desc(), *sira)
+    satirlar = list(session.scalars(q.order_by(*sira).offset((sayfa - 1) * boyut).limit(boyut)))
+    degisiklik = {a: (n, son) for a, n, son in session.execute(
+        select(d.c.anahtar, d.c.sayi, d.c.son).where(d.c.anahtar.in_([m.anahtar for m in satirlar])))}
     konulari = {}
     for a, k in session.execute(select(ArsivKonu.anahtar, ArsivKonu.konu).where(
             ArsivKonu.anahtar.in_([m.anahtar for m in satirlar]), ArsivKonu.ilgili.is_(True))):
         konulari.setdefault(a, []).append(k)
     return {"toplam": toplam, "sayfa": sayfa, "boyut": boyut,
-            "satirlar": [{**_kunye_json(m), "konular": sorted(konulari.get(m.anahtar, []))} for m in satirlar]}
+            "satirlar": [{**_kunye_json(m), "konular": sorted(konulari.get(m.anahtar, [])),
+                          "degisiklik_sayisi": degisiklik.get(m.anahtar, (0, None))[0],
+                          "son_degisiklik": _zaman(degisiklik.get(m.anahtar, (0, None))[1])} for m in satirlar]}
 
 
 def _zaman(z: datetime | None) -> str | None:

@@ -136,6 +136,14 @@ API_GRUPLARI = {
     "api-anahtarlari": "API anahtarları", "arsiv": "Arşiv",
 }
 
+# "anahtar@v2" biçimli değişen mevzuat kaydının arşivdeki karşılığı {anahtar, surum}; eski biçimde (MetinSurumu) None.
+def _arsiv_surumu(kayit) -> dict | None:
+    if kayit.kaynak != "mevzuat_gov" or not kayit.degisiklikler:
+        return None
+    anahtar, _, no = (kayit.dis_id or "").rpartition("@v")
+    return {"anahtar": anahtar, "surum": int(no)} if anahtar and no.isdigit() else None
+
+
 # Swagger sayfası. Dosyalar (frontend/public/swagger) kendi sunucumuzdan gelir, satır içi script yoktur, CSP bozulmaz.
 SWAGGER_SAYFASI = """<!doctype html>
 <html lang="tr">
@@ -688,7 +696,9 @@ def uygulama_olustur(
                     "ozet": k.ozet, "ozet_tablosu": k.ozet_tablosu, "yururluk": k.yururluk,
                     "one_cikanlar": k.one_cikanlar, "metin": k.metin, "kisaltildi": k.kisaltildi, "ocr": k.ocr,
                     "okunamadi": k.kayit.icerik_durumu in ("OCR_GEREKLI", "HATA"),
-                    "degisiklikler": k.degisiklikler, "degisiklik_ozeti": k.degisiklik_ozeti, "kaynakca": k.kaynakca, "haric": k.kayit.haric,
+                    "degisiklikler": k.degisiklikler, "degisiklik_ozeti": k.degisiklik_ozeti, "kaynakca": k.kaynakca,
+                    # Arşivle bağlı "güncel metni değişti" kalemi: panel arşivdeki tam karşılaştırmayı açar.
+                    "arsiv_surumu": _arsiv_surumu(k.kayit), "haric": k.kayit.haric,
                     # Onaylayıcı belgenin aslına baksın diye resmî adres, sadece http ve https.
                     "url": k.kayit.url if k.kayit.url.startswith(("https://", "http://")) else None,
                     # Başlıkta kelimesi yakalanan konuların açıklamaları, bu konu bizi neden ilgilendiriyor.
@@ -1203,10 +1213,14 @@ def uygulama_olustur(
 
     # Arşiv listesi, arama ve süzme ile.
     @api.get("/arsiv/liste")
-    def arsiv_listesi(request: Request, ara: str = "", tur: str = "", durum: str = "", sayfa: int = 1, konu: str = ""):
+    def arsiv_listesi(request: Request, ara: str = "", tur: str = "", durum: str = "", sayfa: int = 1, konu: str = "",
+                      surum: str = ""):
         with Oturum() as db:
             giris_gerekli(request, db)
-            return arsiv.liste(db, ara[:200], tur, durum, sayfa, konu=konu[:200])
+            try:
+                return arsiv.liste(db, ara[:200], tur, durum, sayfa, konu=konu[:200], surum=surum)
+            except ValueError as e:
+                raise HTTPException(400, str(e)) from None
 
     # Arşivde tam metin araması: kelime ya da "ifade", hangi mevzuatın hangi maddesinde, vurgulu parçayla (Faz 2).
     @api.get("/arsiv/ara")

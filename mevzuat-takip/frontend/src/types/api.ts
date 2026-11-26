@@ -75,6 +75,7 @@ export interface Kalem {
   okunamadi: boolean;
   degisiklikler: Degisiklik[] | null;
   degisiklik_ozeti?: string | null; // "Madde 6 değişti; Ek Madde 1 eklendi"
+  arsiv_surumu?: { anahtar: string; surum: number } | null; // arşivdeki yeni sürüm (tam karşılaştırma için)
   kaynakca: string;
   url: string | null; // belgenin resmî adresi
   nedenler: { konu: string; aciklama: string }[]; // eşleşen konuların açıklamaları
@@ -501,6 +502,8 @@ export interface ArsivKunye {
   kalkti: string | null;
   durum: ArsivMetinDurumu;
   surum_sayisi: number;
+  degisiklik_sayisi?: number; // gerçek değişiklik sürümü sayısı (listede)
+  son_degisiklik?: string | null; // son değişiklik sürümünün alındığı an (listede)
   son_cekim: string | null;
   son_hata: string | null;
   ilk_gorulme: string;

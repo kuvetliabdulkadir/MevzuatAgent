@@ -7,6 +7,7 @@ import { Gonderim, Kalem, Kullanici, Mesaj, RaporDetayi, RaporGrubu } from '../t
 import { dagitimPlani, epostaGecerliMi, grubunKalemleri } from '../dagitim';
 import { DurumRozeti, MesajKutusu } from '../bicim';
 import { tarihSaat } from '../tarih';
+import { MevzuatPenceresi } from '../pages/ArsivMevzuat';
 
 // Pencereye verilen bilgiler.
 interface RaporModalProps {
@@ -278,6 +279,21 @@ export const RaporModal: React.FC<RaporModalProps> = ({ raporId, kullanici, onKa
 };
 
 // Tek bir kalemin kartı, işaret kutusu, başlık, iş kolları, eşleşen kelimeler, kime gideceği, özet, yürürlük, metin.
+// Rapordaki değişen mevzuat kaleminden arşivdeki pencereyi açar: Değişiklikler sekmesi, bu sürüm ile bir öncekinin
+// bütün maddeleri (rapordaki parçalar kısaltılmış olabilir).
+const TamKarsilastirma: React.FC<{ anahtar: string; surum: number }> = ({ anahtar, surum }) => {
+  const [acik, setAcik] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setAcik(true)}
+        className="text-xs font-semibold text-petrol underline cursor-pointer">
+        Arşivde tam karşılaştırmayı aç (v{surum - 1} ↔ v{surum})
+      </button>
+      {acik && <MevzuatPenceresi anahtar={anahtar} ilkSekme="degisiklik" ilkSurum={surum} onKapat={() => setAcik(false)} />}
+    </>
+  );
+};
+
 // Fark parçasındaki «değişen kısım» işaretlerini renkli gösterir: eski metinde silinen üstü çizili kırmızı,
 // yeni metinde eklenen kalın yeşil (maildeki gösterimle aynı).
 const Isaretli: React.FC<{ metin: string; taraf: 'eski' | 'yeni' }> = ({ metin, taraf }) => (
@@ -376,6 +392,7 @@ const KalemKarti: React.FC<{
         {k.degisiklik_ozeti && (
           <div className="text-xs text-stone-800"><strong>Özet:</strong> {k.degisiklik_ozeti}</div>
         )}
+        {k.arsiv_surumu && <TamKarsilastirma {...k.arsiv_surumu} />}
         <p className="text-[11px] font-semibold text-stone-500 uppercase font-mono">
           Madde madde değişiklikler: solda eski metin (çıkarılan kısım üstü çizili), sağda yeni metin (eklenen kısım yeşil)
         </p>

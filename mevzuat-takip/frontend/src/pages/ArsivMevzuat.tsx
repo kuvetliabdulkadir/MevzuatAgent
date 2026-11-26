@@ -45,18 +45,27 @@ const HtmlGorunum: React.FC<{ html: string; onBuyut: (src: string) => void; clas
   />
 );
 
-export const MevzuatPenceresi: React.FC<{ anahtar: string; onKapat: () => void }> = ({ anahtar, onKapat }) => {
+// `ilkSekme` ve `ilkSurum` verilirse pencere o sekmede, o sürüm seçili açılır (rapordan "tam karşılaştırma":
+// Değişiklikler sekmesinde seçili sürüm ile bir önceki karşılaştırılır).
+export const MevzuatPenceresi: React.FC<{
+  anahtar: string; onKapat: () => void; ilkSekme?: 'metin' | 'degisiklik'; ilkSurum?: number;
+}> = ({ anahtar, onKapat, ilkSekme, ilkSurum }) => {
   const [detay, setDetay] = useState<ArsivDetayi | null>(null);
   const [surumNo, setSurumNo] = useState<number | null>(null);
-  const [sekme, setSekme] = useState<'metin' | 'orijinal' | 'degisiklik' | 'ekler'>('metin');
+  const [sekme, setSekme] = useState<'metin' | 'orijinal' | 'degisiklik' | 'ekler'>(ilkSekme ?? 'metin');
   const [buyuk, setBuyuk] = useState<string | null>(null);
   const [hata, setHata] = useState('');
 
   useEffect(() => {
     api.get<ArsivDetayi>(`/arsiv/mevzuat/${encodeURIComponent(anahtar)}`)
-      .then((d) => { setDetay(d); setSurumNo(d.surumler[0]?.surum_no ?? null); })
+      .then((d) => {
+        setDetay(d);
+        const istenen = d.surumler.find((s) => s.surum_no === ilkSurum);
+        setSurumNo(istenen?.surum_no ?? d.surumler[0]?.surum_no ?? null);
+        if (d.surumler.length < 2) setSekme('metin');
+      })
       .catch((e) => setHata(e.message));
-  }, [anahtar]);
+  }, [anahtar, ilkSurum]);
   useEffect(() => {
     const tus = (e: KeyboardEvent) => { if (e.key === 'Escape') { if (buyuk) setBuyuk(null); else onKapat(); } };
     window.addEventListener('keydown', tus);

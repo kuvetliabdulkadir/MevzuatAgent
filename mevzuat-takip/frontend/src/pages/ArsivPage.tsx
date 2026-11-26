@@ -21,7 +21,8 @@ const AKTIF = ['BEKLIYOR', 'CALISIYOR', 'DURDURULUYOR'];
 export const ArsivPage: React.FC<{ ayarYonetebilir: boolean }> = ({ ayarYonetebilir }) => {
   const [durum, setDurum] = useState<ArsivDurumu | null>(null);
   const [hata, setHata] = useState('');
-  const [seciliAnahtar, setSeciliAnahtar] = useState<string | null>(null);
+  const [secili, setSecili] = useState<{ anahtar: string; sekme?: 'metin' | 'degisiklik' } | null>(null);
+  const setSeciliAnahtar = (anahtar: string | null) => setSecili(anahtar ? { anahtar } : null);
   const [gunlukIstek, setGunlukIstek] = useState<number | null>(null);
   const suruyor = !!durum?.istek && AKTIF.includes(durum.istek.durum);
 
@@ -47,8 +48,8 @@ export const ArsivPage: React.FC<{ ayarYonetebilir: boolean }> = ({ ayarYonetebi
       {hata && <MesajKutusu tur="hata">{hata}</MesajKutusu>}
       {durum && <IsKarti durum={durum} baslatabilir={ayarYonetebilir} suruyor={suruyor} onDegisti={setDurum} onGunluk={setGunlukIstek} />}
       {durum && <SayilarKarti durum={durum} />}
-      {durum && durum.toplam > 0 && <Liste turler={durum.turler} onSec={setSeciliAnahtar} />}
-      {seciliAnahtar && <MevzuatPenceresi anahtar={seciliAnahtar} onKapat={() => setSeciliAnahtar(null)} />}
+      {durum && durum.toplam > 0 && <Liste turler={durum.turler} onSec={(anahtar, sekme) => setSecili({ anahtar, sekme })} />}
+      {secili && <MevzuatPenceresi anahtar={secili.anahtar} ilkSekme={secili.sekme} onKapat={() => setSecili(null)} />}
       {gunlukIstek !== null && <GunlukPenceresi istekId={gunlukIstek} onSec={setSeciliAnahtar} onKapat={() => setGunlukIstek(null)} />}
     </div>
   );
@@ -223,7 +224,17 @@ const SayilarKarti: React.FC<{ durum: ArsivDurumu }> = ({ durum }) => (
 );
 
 // Arama ve süzmeli liste.
-const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string) => void }> = ({ turler, onSec }) => {
+// Listede sürüm süzgeci (arsiv.SURUM_SUZGECLERI). Okuma düzeltmesi değişiklik sayılmaz.
+const SURUM_SECENEKLERI: [string, string][] = [
+  ['', 'Bütün sürümler'],
+  ['v1', 'Sadece v1 (hiç değişmemiş)'],
+  ['degisen', 'Değişmiş (v2 ve sonrası)'],
+  ['v3', 'En az iki kez değişmiş (v3+)'],
+  ['son7', 'Son 7 günde değişen'],
+  ['son30', 'Son 30 günde değişen'],
+];
+
+const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string, sekme?: 'metin' | 'degisiklik') => void }> = ({ turler, onSec }) => {
   const [ara, setAra] = useState('');
   const [aranan, setAranan] = useState('');
   // "ad": başlıkta/anahtarda ara (liste), "metin": tam metinde ara (Faz 2).
@@ -232,6 +243,7 @@ const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string) 
   const [durum, setDurum] = useState('');
   // "": hepsi, "*": herhangi bir konuyla ilgili, konu adı: o konuyla ilgili (Faz 3).
   const [konu, setKonu] = useState('');
+  const [surum, setSurum] = useState('');
   const [sayfa, setSayfa] = useState(1);
   const [liste, setListe] = useState<ArsivListesi | null>(null);
   const [sonuc, setSonuc] = useState<ArsivAramaSonucu | null>(null);
@@ -249,9 +261,9 @@ const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string) 
         .catch((e) => setHata(e.message)).finally(() => setYukleniyor(false));
       return;
     }
-    const q = new URLSearchParams({ ara: aranan, tur, durum, konu, sayfa: String(sayfa) });
+    const q = new URLSearchParams({ ara: aranan, tur, durum, konu, surum, sayfa: String(sayfa) });
     api.get<ArsivListesi>(`/arsiv/liste?${q}`).then((l) => { setListe(l); setHata(''); }).catch((e) => setHata(e.message));
-  }, [kip, aranan, tur, durum, konu, sayfa]);
+  }, [kip, aranan, tur, durum, konu, surum, sayfa]);
   const toplam = kip === 'metin' ? (sonuc?.toplam ?? 0) : (liste?.toplam ?? 0);
   const boyut = kip === 'metin' ? (sonuc?.boyut ?? 20) : (liste?.boyut ?? 50);
   const sayfaSayisi = Math.max(1, Math.ceil(toplam / boyut));
@@ -294,6 +306,12 @@ const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string) 
               <option value="KALKTI">Siteden kalkan</option>
             </select>
           )}
+          {kip === 'ad' && (
+            <select value={surum} onChange={(e) => { setSurum(e.target.value); setSayfa(1); }} aria-label="Sürüm"
+              className="border border-paper-300 rounded-lg px-2 py-2 bg-white">
+              {SURUM_SECENEKLERI.map(([k, ad]) => <option key={k} value={k}>{ad}</option>)}
+            </select>
+          )}
         </div>
         {konular && !konular.guncel && konular.toplam_ilgili > 0 && (
           <p className="text-amber-700">Konular değişti; ilgili listesi yeniden hesaplanıyor (zamanlayıcı birkaç dakika içinde bitirir).</p>
@@ -329,7 +347,7 @@ const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string) 
         <div className="divide-y divide-paper-200">
           {liste.satirlar.length === 0 && <p className="px-5 py-4 text-stone-500">Sonuç yok.</p>}
           {liste.satirlar.map((m) => (
-            <button key={m.anahtar} type="button" onClick={() => onSec(m.anahtar)}
+            <button key={m.anahtar} type="button" onClick={() => onSec(m.anahtar, (m.degisiklik_sayisi ?? 0) > 0 && surum && surum !== 'v1' ? 'degisiklik' : undefined)}
               className="w-full text-left px-4 sm:px-5 py-2.5 hover:bg-paper-100 cursor-pointer flex flex-col sm:flex-row sm:items-start justify-between gap-1">
               <span className="text-stone-800 min-w-0">
                 <span className="font-medium">{m.ad}</span>
@@ -337,6 +355,11 @@ const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string) 
                   {m.tur_adi} · RG {tarihSaat(m.rg_tarihi)}{m.rg_sayisi ? ` / ${m.rg_sayisi}` : ''} · {m.anahtar}
                   {m.mulga && ' · mülga'}{m.kalkti && ` · siteden kalktı (${tarihSaat(m.kalkti)})`}
                 </span>
+                {(m.degisiklik_sayisi ?? 0) > 0 && (
+                  <span className="block text-amber-800">
+                    {m.degisiklik_sayisi} kez değişti · son değişiklik {tarihSaat(m.son_degisiklik ?? null)}
+                  </span>
+                )}
                 {(m.konular ?? []).length > 0 && (
                   <span className="flex flex-wrap gap-1 mt-0.5">
                     {m.konular?.map((k) => <span key={k} className="px-1.5 rounded bg-petrol/10 text-petrol">{k}</span>)}
