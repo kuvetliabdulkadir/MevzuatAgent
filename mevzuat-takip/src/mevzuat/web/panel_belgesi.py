@@ -212,7 +212,12 @@ BELGE: dict[tuple[str, str], tuple[str, str, str, dict]] = {
     ("POST", "/panel/api/arsiv/durdur"): ("Arşiv işini durdur", "Sıradaki iş hemen, çalışan iş sıradaki mevzuattan sonra durur.", AYAR,
                                     {**H401, **H403, 409: _hata("Durdurulacak iş yok", "Çalışan ya da sırada bekleyen arşiv işi yok.")}),
     ("GET", "/panel/api/arsiv/liste"): ("Arşiv listesi", "Arşivdeki mevzuat, `ara` (ad ya da anahtar), `tur`, `durum` (TAMAM, BEKLIYOR, "
-                                  "OCR_GEREKLI, SITEDE_YOK, HATA, KALKTI, KUSURLU), `konu` (o konuyla ilgililer, * hepsi) ve `sayfa` ile. Sayfa başına 50 kayıt.", HERKES, H401),
+                                  "OCR_GEREKLI, SITEDE_YOK, HATA, KALKTI, KUSURLU), `konu` (o konuyla ilgililer, * hepsi), `surum` (vN: şu anki hali N. "
+                                  "sürüm olanlar, sonG: son G günde değişenler; seçenekler /arsiv/surumler'den) ve `sayfa` ile. "
+                                  "Sayfa başına 50 kayıt.", HERKES, H401),
+    ("GET", "/panel/api/arsiv/surumler"): ("Arşivin sürüm süzgeci", "Arşivde var olan sürüm numaraları (v1, v2 …, okuma düzeltmesi "
+                                     "sayılmaz) ve son 7 / 30 / 90 günde değişen mevzuat sayıları. Seçenekler veriden gelir.",
+                                     HERKES, H401),
     ("GET", "/panel/api/arsiv/ara"): ("Arşivde arama", "`q` kelime ya da \"tırnak içinde ifade\" (sonuna * yazılırsa başı tutsun yeter): "
                                 "hangi mevzuatın hangi maddesinde geçtiği, vurgulu parçayla. Türkçe ek kuralı filtreyle ortak "
                                 "(\"altın\" altının'ı bulur, Altınbaş'ı bulmaz). `tur`, `konu` (sadece o konuyla ilgililer), `sayfa`.",

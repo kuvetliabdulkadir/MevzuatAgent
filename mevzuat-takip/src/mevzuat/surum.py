@@ -346,8 +346,13 @@ def _degisen_parcalar(eski: str, yeni: str, baglam: int = 8) -> tuple[list[tuple
 _BICIM = re.compile(r"[\s|«»…]+")
 
 
+# Sitenin dipnot işaretleri "[22]": metne yeni dipnot eklenince sonrakilerin hepsi kayıyor ([22] → [24]), bu tek başına
+# değişiklik sayılmaz (1.5.6222 Sporda Şiddet Kanunu, 2026-11-26: 7 maddede sadece dipnot numarası farkı).
+_DIPNOT = re.compile(r"\[\d{1,3}\]")
+
+
 def _ayni_yazi(a: str, b: str) -> bool:
-    return _BICIM.sub("", a) == _BICIM.sub("", b)
+    return _BICIM.sub("", _DIPNOT.sub("", a)) == _BICIM.sub("", _DIPNOT.sub("", b))
 
 
 # İki metin arasındaki bütün farkları madde madde listeler.

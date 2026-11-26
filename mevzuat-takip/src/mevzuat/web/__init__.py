@@ -1231,6 +1231,13 @@ def uygulama_olustur(
             return arama.ara(db, q[:300], tur, konu[:200], sayfa)
 
     # Konu filtresinin arşivdeki durumu: konu başına ilgili mevzuat sayısı, son hesaplama (Faz 3).
+    # Sürüm süzgecinin seçenekleri veriden gelir (hangi sürüm numaraları var, son 7/30/90 günde kaç değişiklik).
+    @api.get("/arsiv/surumler")
+    def arsiv_surumleri(request: Request):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            return arsiv.surum_secenekleri(db)
+
     @api.get("/arsiv/konular")
     def arsiv_konulari(request: Request):
         from mevzuat import arama

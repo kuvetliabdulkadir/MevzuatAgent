@@ -14,7 +14,7 @@ import difflib
 import html as html_lib
 import re
 
-from mevzuat.surum import bolumler
+from mevzuat.surum import _ayni_yazi, bolumler
 
 _MULGA = re.compile(r"^\s*(?:(?:Ek|EK|Geçici|GEÇİCİ|Mükerrer|MÜKERRER)\s+)?(?:Madde|MADDE)\s+\S+\s*[–—-]?\s*\(\s*Mülga", re.IGNORECASE)
 _KELIME_SINIRI = 60_000  # bundan uzun bölümlerde hızlı (autojunk) karşılaştırma
@@ -47,7 +47,8 @@ def fark(eski_metin: str, yeni_metin: str) -> dict:
     for ad, metin in yeni.items():
         if ad not in eski:
             sonuc.append({"bolum": ad, "tur": "eklendi", "html": f"<ins>{_e(metin)}</ins>", "eski": None, "yeni": metin})
-        elif " ".join(eski[ad].split()) == " ".join(metin.split()):
+        # Sadece boşluk / tablo ayırıcısı farkı (okuyucu değişince) değişiklik sayılmaz; rapordaki kuralla aynı.
+        elif " ".join(eski[ad].split()) == " ".join(metin.split()) or _ayni_yazi(eski[ad], metin):
             sonuc.append({"bolum": ad, "tur": "ayni", "html": _e(metin), "eski": eski[ad], "yeni": metin})
         else:
             tur = "mulga" if _MULGA.match(metin) and not _MULGA.match(eski[ad]) else "degisti"

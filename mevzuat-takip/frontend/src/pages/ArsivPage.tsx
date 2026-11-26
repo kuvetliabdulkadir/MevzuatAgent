@@ -224,15 +224,11 @@ const SayilarKarti: React.FC<{ durum: ArsivDurumu }> = ({ durum }) => (
 );
 
 // Arama ve süzmeli liste.
-// Listede sürüm süzgeci (arsiv.SURUM_SUZGECLERI). Okuma düzeltmesi değişiklik sayılmaz.
-const SURUM_SECENEKLERI: [string, string][] = [
-  ['', 'Bütün sürümler'],
-  ['v1', 'Sadece v1 (hiç değişmemiş)'],
-  ['degisen', 'Değişmiş (v2 ve sonrası)'],
-  ['v3', 'En az iki kez değişmiş (v3+)'],
-  ['son7', 'Son 7 günde değişen'],
-  ['son30', 'Son 30 günde değişen'],
-];
+// Sürüm süzgecinin seçenekleri sunucudan gelir (arsiv.surum_secenekleri): arşivde hangi sürümler varsa onlar.
+interface SurumSecenekleri {
+  surumler: { kod: string; no: number; sayi: number }[];
+  donemler: { kod: string; gun: number; sayi: number }[];
+}
 
 const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string, sekme?: 'metin' | 'degisiklik') => void }> = ({ turler, onSec }) => {
   const [ara, setAra] = useState('');
@@ -244,6 +240,7 @@ const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string, 
   // "": hepsi, "*": herhangi bir konuyla ilgili, konu adı: o konuyla ilgili (Faz 3).
   const [konu, setKonu] = useState('');
   const [surum, setSurum] = useState('');
+  const [surumler, setSurumler] = useState<SurumSecenekleri | null>(null);
   const [sayfa, setSayfa] = useState(1);
   const [liste, setListe] = useState<ArsivListesi | null>(null);
   const [sonuc, setSonuc] = useState<ArsivAramaSonucu | null>(null);
@@ -252,6 +249,7 @@ const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string, 
   const [yukleniyor, setYukleniyor] = useState(false);
 
   useEffect(() => { api.get<ArsivKonulari>('/arsiv/konular').then(setKonular).catch(() => setKonular(null)); }, []);
+  useEffect(() => { api.get<SurumSecenekleri>('/arsiv/surumler').then(setSurumler).catch(() => setSurumler(null)); }, []);
   useEffect(() => {
     if (kip === 'metin') {
       if (!aranan.trim()) { setSonuc(null); return; }
@@ -309,7 +307,15 @@ const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string, 
           {kip === 'ad' && (
             <select value={surum} onChange={(e) => { setSurum(e.target.value); setSayfa(1); }} aria-label="Sürüm"
               className="border border-paper-300 rounded-lg px-2 py-2 bg-white">
-              {SURUM_SECENEKLERI.map(([k, ad]) => <option key={k} value={k}>{ad}</option>)}
+              <option value="">Bütün sürümler</option>
+              {surumler?.surumler.map((s) => (
+                <option key={s.kod} value={s.kod}>
+                  {s.no === 1 ? 'v1 (hiç değişmemiş)' : `v${s.no} (${s.no - 1} kez değişmiş)`} · {s.sayi.toLocaleString('tr-TR')}
+                </option>
+              ))}
+              {surumler?.donemler.map((d) => (
+                <option key={d.kod} value={d.kod}>Son {d.gun} günde değişen · {d.sayi.toLocaleString('tr-TR')}</option>
+              ))}
             </select>
           )}
         </div>

@@ -409,6 +409,26 @@ def arsiv_kur_komutu(args: argparse.Namespace) -> None:
 
 
 # "arsiv-kontrol" komutu, teslim kontrolü (arsiv_kontrol.py). Zorunlu ölçütlerden biri tutmazsa çıkış kodu 1.
+# "arsiv-degisim" komutu, son günlerde arşive giren değişiklik sürümlerini denetler (sadece okur).
+def arsiv_degisim_komutu(args: argparse.Namespace) -> None:
+    from mevzuat import arsiv
+
+    engine = make_engine()
+    with Session(engine) as session:
+        satirlar = arsiv.degisim_denetimi(session, args.gun)
+    if not satirlar:
+        print(f"Son {args.gun} günde arşive değişiklik sürümü girmedi.")
+        return
+    dogru = sum(1 for s in satirlar if s["durum"] == "dogrulandi")
+    print(f"Son {args.gun} günde {len(satirlar)} değişiklik: {dogru} RG ya da AYM notuyla doğrulandı, "
+          f"{len(satirlar) - dogru} elle bakılacak.\n")
+    for s in satirlar:
+        isaret = "TAMAM " if s["durum"] == "dogrulandi" else "BAK   "
+        print(f"{isaret} {s['anahtar']} v{s['surum']}  {s['cekildi']}  {s['ad'][:90]}")
+        print(f"       değişen: {s['ozet']}")
+        print(f"       yeni RG/AYM notu: {', '.join(s['yeni_rg_notlari']) or 'yok'} · {s['rapor']}")
+
+
 def arsiv_kontrol_komutu(args: argparse.Namespace) -> None:
     from mevzuat import arsiv, arsiv_kontrol
 
@@ -701,6 +721,9 @@ def main() -> None:
                                                  "(arşivde olmaları gerekir), ör. --anahtar 1.5.4760 20.5.5123")
     ak.set_defaults(func=arsiv_kur_komutu)
     alt.add_parser("arsiv-durum", help="Arşivde tür başına kaç mevzuat var").set_defaults(func=arsiv_durum_komutu)
+    adg = alt.add_parser("arsiv-degisim", help="Son günlerde arşive giren değişiklikleri denetle (RG notu, rapor kaydı)")
+    adg.add_argument("--gun", type=int, default=7, help="Kaç gün geriye bakılsın (varsayılan 7)")
+    adg.set_defaults(func=arsiv_degisim_komutu)
     akn = alt.add_parser("arsiv-kontrol", help="Arşivin teslim kontrolü (sadece okur), rapor arsiv/kontrol/ altına yazılır")
     akn.add_argument("--sha", action="store_true", help="Her dosyanın SHA-256 özetini de doğrula (bütün dosyaları okur, uzun sürer)")
     akn.set_defaults(func=arsiv_kontrol_komutu)

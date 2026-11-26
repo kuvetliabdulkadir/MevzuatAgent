@@ -458,21 +458,35 @@ def test_pdfli_yeni_yayin_ertesi_gun_de_cekilmez(session, konular):
 
 # --- arşiv listesinde sürüm süzgeci ve rapordan arşive geçiş -------------------------------------------
 
-def test_arsiv_listesi_surum_suzgeci(session, konular):
+def test_arsiv_listesi_surum_suzgeci_veriden(session, konular):
     site = SahteMevzuatGov({KUYUM: KUYUM_HTML, "1.5.4760": _sade()})
     _calistir(session, site, konular)
+    gun8 = SIMDI + timedelta(days=8)
+    # Henüz değişiklik yok: seçeneklerde sadece v1, dönem sayıları 0.
+    sec = arsiv.surum_secenekleri(session, gun8)
+    assert [s["kod"] for s in sec["surumler"]] == ["v1"]
+    assert [(d["kod"], d["sayi"]) for d in sec["donemler"]] == [("son7", 0), ("son30", 0), ("son90", 0)]
+    # Kuyum değişti: v2 seçeneği kendiliğinden çıkar.
     site.metinler[KUYUM] = _degistir(KUYUM_HTML)
-    _calistir(session, site, konular, simdi=SIMDI + timedelta(days=8))
-    anahtarlar = lambda **kw: [r["anahtar"] for r in arsiv.liste(session, simdi=SIMDI + timedelta(days=8), **kw)["satirlar"]]
-    assert anahtarlar(surum="degisen") == [KUYUM]
-    assert anahtarlar(surum="son7") == [KUYUM]
+    _calistir(session, site, konular, simdi=gun8)
+    sec = arsiv.surum_secenekleri(session, gun8)
+    sayilar = {s["kod"]: s["sayi"] for s in sec["surumler"]}
+    assert sayilar["v2"] == 1 and "v3" not in sayilar
+    assert {d["kod"]: d["sayi"] for d in sec["donemler"]} == {"son7": 1, "son30": 1, "son90": 1}
+    anahtarlar = lambda **kw: [r["anahtar"] for r in arsiv.liste(session, simdi=gun8, **kw)["satirlar"]]
+    assert anahtarlar(surum="v2") == [KUYUM] and anahtarlar(surum="son7") == [KUYUM]
     assert KUYUM not in anahtarlar(surum="v1") and "1.5.4760" in anahtarlar(surum="v1")
-    assert anahtarlar(surum="v3") == []
-    satir = arsiv.liste(session, surum="degisen")["satirlar"][0]
-    assert satir["degisiklik_sayisi"] == 1 and satir["son_degisiklik"].startswith("2026-10-09")
-    assert arsiv.liste(session, simdi=SIMDI + timedelta(days=60), surum="son30")["toplam"] == 0
-    with pytest.raises(ValueError):
-        arsiv.liste(session, surum="v9")
+    # Bir kez daha değişti: v3 çıkar, v2 boşalır (seçeneklerden düşer).
+    site.metinler[KUYUM] = KUYUM_HTML
+    _calistir(session, site, konular, simdi=gun8 + timedelta(days=8))
+    kodlar = [s["kod"] for s in arsiv.surum_secenekleri(session, gun8 + timedelta(days=8))["surumler"]]
+    assert "v3" in kodlar and "v2" not in kodlar
+    satir = arsiv.liste(session, surum="v3")["satirlar"][0]
+    assert satir["degisiklik_sayisi"] == 2
+    assert arsiv.liste(session, simdi=SIMDI + timedelta(days=200), surum="son90")["toplam"] == 0
+    for kotu in ("v0", "degisen", "son", "x"):
+        with pytest.raises(ValueError):
+            arsiv.liste(session, surum=kotu)
 
 
 def test_rapor_kalemi_arsiv_surumunu_verir(session, konular):
@@ -485,3 +499,37 @@ def test_rapor_kalemi_arsiv_surumunu_verir(session, konular):
     assert _arsiv_surumu(session.scalar(select(Kayit))) == {"anahtar": KUYUM, "surum": 2}
     eski = Kayit(kaynak="mevzuat_gov", dis_id=f"{KUYUM}@17", degisiklikler=[{"bolum": "Madde 1"}])
     assert _arsiv_surumu(eski) is None  # arşivden önceki (metin_surumleri) kayıt
+
+
+def test_panel_farki_da_bicim_farkini_degisiklik_saymaz():
+    from mevzuat import arsiv_fark
+
+    f = arsiv_fark.fark("MADDE 2 – Teslim sayılır. [1] Haller: MADDE 3 – on gün", "MADDE 2 – Teslim sayılır.[1] Haller: MADDE 3 – on bir gün")
+    assert f["sayac"]["degisti"] == 1
+    assert [b["tur"] for b in f["bolumler"]] == ["ayni", "degisti"]
+
+
+def test_dipnot_numarasi_kaymasi_degisiklik_degil():
+    """Metne yeni dipnot eklenince sonrakiler kayıyor ([22] → [24]); sadece o madde değişmiş sayılır."""
+    eski = "MADDE 20 – Yükümlülüklerin getirilmemesi [22] halinde. MADDE 27 – Ceza verilir. [23]"
+    yeni = ("MADDE 20 – Yükümlülüklerin getirilmemesi[24] halinde. MADDE 27 – Ceza verilir. Anayasa Mahkemesinin "
+            "25/6/2026 tarihli ve E.: 2025/211; K: 2026/146 sayılı Kararı ile bu fıkra iptal edilmiştir. [22] [25]")
+    assert {f.bolum for f in surum.farklar(eski, yeni)} == {"Madde 27"}
+
+
+def test_degisim_denetimi_rg_aym_notu(session, konular):
+    site = SahteMevzuatGov({KUYUM: KUYUM_HTML})
+    _calistir(session, site, konular)
+    gun8 = SIMDI + timedelta(days=8)
+    # Notsuz değişiklik: elle bakılacak.
+    site.metinler[KUYUM] = _degistir(KUYUM_HTML)
+    _calistir(session, site, konular, simdi=gun8)
+    [d] = arsiv.degisim_denetimi(session, 7, gun8)
+    assert d["durum"] == "elle_bak" and d["surum"] == 2 and "rapor" not in d["rapor"].split(",")[0]
+    assert d["rapor"].startswith("kayıt #") and "Madde 6" in d["ozet"]
+    # Yeni RG notuyla gelen değişiklik doğrulanır.
+    site.metinler[KUYUM] = _degistir(KUYUM_HTML).replace(
+        "elektronik ortamda kaydeder.", "elektronik ortamda kaydeder. (Ek:RG-1/12/2026-33500)", 1)
+    _calistir(session, site, konular, simdi=gun8 + timedelta(days=8))
+    d = arsiv.degisim_denetimi(session, 7, gun8 + timedelta(days=8))[0]
+    assert d["durum"] == "dogrulandi" and d["surum"] == 3 and any("33500" in n for n in d["yeni_rg_notlari"])

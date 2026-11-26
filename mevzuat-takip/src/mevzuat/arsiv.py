@@ -718,8 +718,11 @@ def _tr_buyuk(metin: str) -> str:
 
 
 # Arşiv listesi, arama ve süzme ile, sayfa sayfa.
-# Listede sürüm süzgeci (panel): gerçek değişiklik sürümleri sayılır, okuma düzeltmesi sayılmaz.
-SURUM_SUZGECLERI = ("v1", "degisen", "v3", "son7", "son30")
+# Listede sürüm süzgeci (panel). Seçenekler veriden gelir (surum_secenekleri): arşivde hangi sürüm numaraları varsa
+# onlar (v1, v2, v3 …) ve son DONEMLER gün içinde değişenler. Gerçek değişiklik sürümleri sayılır, okuma düzeltmesi
+# sayılmaz: "v2" şu anki hali ilk halinden bir kez değişmiş mevzuattır.
+DONEMLER = (7, 30, 90)
+_SURUM_KODU = re.compile(r"^v([1-9]\d{0,3})$|^son(\d{1,4})$")
 
 
 def _degisiklikler_sorgusu():
@@ -731,21 +734,22 @@ def _degisiklikler_sorgusu():
 def liste(session: Session, ara: str = "", tur: str = "", durum: str = "", sayfa: int = 1, boyut: int = 50,
           konu: str = "", surum: str = "", simdi: datetime | None = None) -> dict:
     """`konu` verilirse sadece o konuyla ilgili olanlar; "*" ise herhangi bir konuyla ilgili olanlar (Faz 3).
-    `surum`: v1 (hiç değişmemiş, sadece ilk sürüm), degisen (en az bir değişiklik, v2 ve sonrası), v3 (en az iki
-    değişiklik), son7 / son30 (son 7 / 30 günde değişen). Değişenler son değişikliğe göre yeniden eskiye sıralanır."""
-    if surum and surum not in SURUM_SUZGECLERI:
+    `surum`: "vN" şu anki hali N. sürüm olanlar (v1: hiç değişmemiş), "sonG" son G günde değişenler.
+    Değişenler son değişikliğe göre yeniden eskiye sıralanır."""
+    m_kod = _SURUM_KODU.match(surum) if surum else None
+    if surum and m_kod is None:
         raise ValueError(f"Bilinmeyen sürüm süzgeci: {surum}")
     simdi = simdi or datetime.now()
     d = _degisiklikler_sorgusu()
     q = select(ArsivMevzuat)
     if surum == "v1":
         q = q.where(ArsivMevzuat.surum_sayisi > 0, ArsivMevzuat.anahtar.not_in(select(d.c.anahtar)))
-    elif surum:
+    elif m_kod is not None:
         q = q.join(d, d.c.anahtar == ArsivMevzuat.anahtar)
-        if surum == "v3":
-            q = q.where(d.c.sayi >= 2)
-        elif surum in ("son7", "son30"):
-            q = q.where(d.c.son >= simdi - timedelta(days=7 if surum == "son7" else 30))
+        if m_kod.group(1):
+            q = q.where(d.c.sayi == int(m_kod.group(1)) - 1)
+        else:
+            q = q.where(d.c.son >= simdi - timedelta(days=int(m_kod.group(2))))
     if konu:
         ilgili = select(ArsivKonu.anahtar).where(ArsivKonu.ilgili.is_(True))
         if konu != "*":
@@ -781,6 +785,64 @@ def liste(session: Session, ara: str = "", tur: str = "", durum: str = "", sayfa
             "satirlar": [{**_kunye_json(m), "konular": sorted(konulari.get(m.anahtar, [])),
                           "degisiklik_sayisi": degisiklik.get(m.anahtar, (0, None))[0],
                           "son_degisiklik": _zaman(degisiklik.get(m.anahtar, (0, None))[1])} for m in satirlar]}
+
+
+# Son günlerdeki değişiklik sürümlerinin denetimi (sadece okur). Gerçek bir değişiklik metne çoğu zaman yeni bir
+# "(Değişik/Ek/Mülga: RG-tarih-sayı)" notu ekler; yeni sürümde önceki sürümde olmayan not varsa "dogrulandi".
+# Yoksa "elle_bak": okuma farkı olabilir ya da site notsuz düzeltme yapmış olabilir. Rapor kaydı açılıp açılmadığı da yazılır.
+_AYM_NOTU = re.compile(r"Anayasa Mahkemesinin\s+(\d{1,2}/\d{1,2}/\d{4})\s+tarihli\s+ve\s+E\.?\s*:?\s*(\d{4}/\d+)\s*[;,]\s*"
+                       r"K\.?\s*:?\s*(\d{4}/\d+)")
+
+
+def degisim_denetimi(session: Session, gun: int = 7, simdi: datetime | None = None) -> list[dict]:
+    from mevzuat import surum as surum_
+    from mevzuat.db import Kayit
+
+    simdi = simdi or datetime.now()
+    sonuc = []
+    yeniler = session.scalars(select(ArsivSurumu).where(ArsivSurumu.surum_turu == "degisiklik",
+                                                        ArsivSurumu.cekildi >= simdi - timedelta(days=gun))
+                              .order_by(ArsivSurumu.cekildi.desc())).all()
+    for s in yeniler:
+        onceki = session.scalar(select(ArsivSurumu).where(ArsivSurumu.anahtar == s.anahtar,
+                                                          ArsivSurumu.surum_no < s.surum_no,
+                                                          ArsivSurumu.surum_turu != "okuma_duzeltmesi")
+                                .order_by(ArsivSurumu.surum_no.desc()).limit(1))
+        # Eski okuyucuyla alınmış sürümde notlar kayıtlı değil, metinden çıkarılır.
+        notlar = lambda x: ({(n.get("tarih"), n.get("sayi")) for n in (x.rg_notlari or arsiv_cekim.rg_notlari(x.metin))}
+                            if x else set())
+        yeni_notlar = sorted(notlar(s) - notlar(onceki), key=lambda t: str(t))
+        # Anayasa Mahkemesi iptal kararları "(Değişik: RG-…)" biçiminde değil, metne not olarak giriyor.
+        aym = lambda x: set(_AYM_NOTU.findall(x.metin)) if x else set()
+        yeni_aym = sorted(aym(s) - aym(onceki))
+        farklar = surum_.farklar(onceki.metin, s.metin) if onceki else []
+        kayit = session.scalar(select(Kayit).where(Kayit.kaynak == surum_.KAYNAK_ADI,
+                                                   Kayit.dis_id == f"{s.anahtar}@v{s.surum_no}"))
+        m = session.get(ArsivMevzuat, s.anahtar)
+        sonuc.append({
+            "anahtar": s.anahtar, "ad": m.ad if m else "", "surum": s.surum_no, "cekildi": _zaman(s.cekildi),
+            "durum": "dogrulandi" if yeni_notlar or yeni_aym else "elle_bak",
+            "yeni_rg_notlari": [f"RG {t} / {n}" for t, n in yeni_notlar]
+                               + [f"AYM {t} E.{e} K.{k}" for t, e, k in yeni_aym],
+            "ozet": surum_.fark_ozeti([{"bolum": f.bolum, "tur": f.tur} for f in farklar]) or "maddelerde fark yok",
+            "rapor": f"kayıt #{kayit.id}" + (f", rapor #{kayit.rapor_id}" if kayit.rapor_id else "") if kayit
+            else "rapor kaydı yok (konuya uymadı ya da maddelerde fark yok)",
+        })
+    return sonuc
+
+
+# Sürüm süzgecinin seçenekleri, sayılarıyla: arşivde var olan her sürüm numarası ve son 7 / 30 / 90 günde değişenler.
+def surum_secenekleri(session: Session, simdi: datetime | None = None) -> dict:
+    simdi = simdi or datetime.now()
+    d = _degisiklikler_sorgusu()
+    degisen = dict(session.execute(select(d.c.sayi + 1, func.count()).group_by(d.c.sayi)).all())
+    surumlu = session.scalar(select(func.count()).select_from(ArsivMevzuat).where(ArsivMevzuat.surum_sayisi > 0)) or 0
+    sayilar = {1: surumlu - sum(degisen.values()), **degisen}
+    donemler = [{"kod": f"son{g}", "gun": g,
+                 "sayi": session.scalar(select(func.count()).select_from(d).where(d.c.son >= simdi - timedelta(days=g)))
+                 or 0} for g in DONEMLER]
+    return {"surumler": [{"kod": f"v{n}", "no": n, "sayi": sayilar[n]} for n in sorted(sayilar) if sayilar[n] > 0],
+            "donemler": donemler}
 
 
 def _zaman(z: datetime | None) -> str | None:
