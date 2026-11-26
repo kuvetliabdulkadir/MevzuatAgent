@@ -182,6 +182,12 @@ def _dosyalari_denetle(r: Rapor, session: Session, klasor: Path, sha_dogrula: bo
     okunus = Counter()
     for d in session.scalars(select(ArsivDosyasi).execution_options(yield_per=500)):
         r.dosya(d.yol)
+        # Arşiv dosyasından çıkanlar ve ek sayfalarının görüntüleri de bu dosyanın parçası (panelde "Ekler" gösterir);
+        # sayılmazsa sahipsiz görünürlerdi (2026-11-26: 1.558 ek sayfa görüntüsü yanlışlıkla sahipsiz sayılıyordu).
+        for i in d.ic or []:
+            r.dosya(i.get("yol"))
+        for p in d.sayfalar or []:
+            r.dosya(p.get("goruntu"))
         okunus[(d.bicim, d.durum)] += 1
         if d.durum != "tamam":
             r.bak("gorunumu_olmayan_dosya", {"sha256": d.sha256[:16], "ad": d.ad, "bicim": d.bicim, "notlar": d.notlar[:2]})
