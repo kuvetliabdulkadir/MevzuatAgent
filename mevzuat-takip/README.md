@@ -4,9 +4,13 @@ Resmî kaynaklarda yayımlanan mevzuatı ve duyuruları her gün otomatik toplay
 belgelerin içeriğini okuyup her kalemin altında resmî kaynak linki olan bir rapor hazırlayan ve **bir sorumlunun onayından sonra** raporu ilgili ekiplere
 mail ile dağıtan sistem.
 
-Bir kuyumculuk firmasında staj projesi olarak geliştirildi (Ekim 2026). İş kolları: **Kuyum, Döviz/Altın, Oto kiralama** ve hepsini ilgilendiren **Ortak**.
+Ayrıca mevzuat.gov.tr'de **yürürlükteki bütün mevzuatın sürümlü arşivini** tutar (19 bini aşkın kanun, yönetmelik, tebliğ,
+CB kararı …; metin, ekler, PDF'ler, taranmış sayfalar): değişen mevzuat yeni sürüm olur, önceki sürümle madde madde
+karşılaştırılır, firmayı ilgilendiren değişiklik rapora girer.
 
-> **Durum:** Canlıda çalışıyor (Docker, Ubuntu 24.04, HTTPS). 441 test geçiyor.
+Bir kuyumculuk firmasında staj projesi olarak geliştirildi (Ekim-Kasım 2026). İş kolları: **Kuyum, Döviz/Altın, Oto kiralama** ve hepsini ilgilendiren **Ortak**.
+
+> **Durum:** Canlıda çalışıyor (Docker, Ubuntu 24.04, HTTPS). Arşivin tam taraması 25.11.2026'da bitti. 550 test geçiyor (Linux).
 
 ---
 
@@ -19,13 +23,14 @@ Zamanlayıcı (varsayılan 06:30 + 18:00 Türkiye saati, panelden değişir) ya 
 Kaynaklar ── Resmî Gazete (günlük fihrist) · MASAK (WordPress API) · GİB (sitenin JSON API'si)
    │         · Mevzuat Bilgi Sistemi (yeni eklenen mevzuat)
    │         panelden eklenenler (düz HTML / RSS, tip adresten otomatik bulunur)
-   │         + mevzuat.gov.tr güncel metin takibi (21 mevzuat, madde bazında fark)
-   ▼
-Başlık filtresi (konular + anahtar kelimeler, Türkçe karakter duyarsız) → ilgisizin içeriği indirilmez
+   │         + mevzuat.gov.tr "bugün güncellenenler" → ARŞİV (yeni sürüm, v1↔v2, v2↔v3 madde madde fark)
    ▼
 İçerik: HTML · PDF · taranmış PDF için OCR (Tesseract, Türkçe)
    ▼
-Rapor: madde özeti, tablolar, yürürlük tarihi, "neden size geldi", orijinal PDF ekte
+Konu filtresi: başlık + içerik puanı (bölüm ağırlıklı, Türkçe ek kuralı), arşivle aynı kural
+   ▼
+Rapor: mevzuat hakkında (amaç, kapsam, dayanak), madde özeti, tablolar, yürürlük tarihi, "neden size geldi",
+       değişen mevzuatta eski/yeni işaretli + tam karşılaştırma bağlantısı, orijinal PDF ekte
    ▼
 ONAY BEKLİYOR → onaylayıcıya mail → panelde incele, kalem çıkar, not yaz → onayla / reddet
    ▼
@@ -43,8 +48,30 @@ Sağlık kontrolü → sorun varsa yöneticiye UYARI, her pazartesi NABIZ maili
 - **Kod yazmadan genişletme:** kaynak, konu, anahtar kelime, iş kolu, alıcı grubu ve tarama saatleri panelden yönetilir.
   Yeni kaynak eklerken sadece adres girilir, sistem tipi (WordPress / RSS / düz HTML) ve seçicileri kendisi bulur.
   Konu değiştirmeden önce son 90 günde neyin eklenip düşeceği gösterilir.
-- **Güncel metin takibi:** mevzuat.gov.tr'deki metin değişince eski/yeni farkı madde madde onaya gelir.
-- **Yapay zekâ yok, uydurma yok:** özet kurallarla çıkarılır. OCR metni dayanak sayılmaz, orijinal PDF her zaman ekte.
+- **Güncel metin takibi:** mevzuat.gov.tr'deki metin değişince eski/yeni farkı madde madde onaya gelir. Takipte olmayan
+  mevzuatın değişikliği de, değişen maddeleri bir konuya uyuyorsa rapora girer. Sadece okuma iyileşmesi (okuma düzeltmesi),
+  boşluk ve dipnot numarası kayması değişiklik sayılmaz.
+- **Tek filtre:** günlük tarama, arşiv ve değişen mevzuat aynı puanı kullanır (başlık, amaç/kapsam, tanımlar, gövde ayrı
+  ağırlıklı; "altın" → "altının" evet, "Altınbaş" hayır). Üniversitelerin iç yönetmelikleri hiçbir konuya girmez.
+- **Yapay zekâ yok, uydurma yok:** özet ve "mevzuat hakkında" metnin kendi cümleleridir. OCR metni dayanak sayılmaz, orijinal PDF her zaman ekte.
+
+### Arşiv
+
+- **Kapsam:** mevzuat.gov.tr'nin listelediği bütün türler (kanun, KHK, tüzük, CB kararnamesi, yönetmelik, tebliğ, CB kararı,
+  CB genelgesi, mülga). Metin HTML yapısıyla; Word/Excel/PowerPoint/RTF ekleri ve zip/rar içleri okunur (LibreOffice);
+  PDF'ler sayfa sayfa, taranmışsa OCR; harita ve tablo sayfalarının görüntüsü saklanır; sitenin PDF'i ayrıca saklanır.
+- **Sürüm:** değişen metin v2, v3 olur, eski sürüm silinmez. Kaynak aynı kalıp okuma iyileştiyse "okuma düzeltmesi" (rapora girmez).
+- **Panel:** adında ve metninde arama (Türkçe ek kuralıyla), konu, tür, durum ve sürüm süzgeci (veriden: v1, v2 …; son
+  7/30/90 günde değişen); mevzuat penceresinde Metin / Orijinal PDF / Değişiklikler (iki sürüm seçilir; tam metin,
+  sadece değişenler ya da yan yana) / Ekler.
+- **Güncel tutma:** günlük taramada "bugün güncellenenler" ve takipteki mevzuat; haftada bir gece liste yenileme (yeni
+  mevzuat eklenir, siteden kalkan işaretlenir). Panelden "yeniden çek" (hepsini baştan) ayrıca EVET onayı ister.
+- **Denetim:** `arsiv-degisim --gun 7` son değişiklikleri yeni RG / Anayasa Mahkemesi notuna göre "doğrulandı" ya da
+  "elle bak" diye listeler; `arsiv-kontrol` teslim kontrolü (eksik dosya, okunamayan sayfa, kusurlu kayıt).
+- **Rapordan karşılaştırma:** mailde "Değişikliklerin tamamını gör" bağlantısı girişsiz açılır, MEVZUAT_GIZLI_ANAHTAR ile
+  imzalıdır (adres değiştirilirse açılmaz).
+- **Taşınabilir:** dosya yolları arşiv klasörüne göreli (`MEVZUAT_ARSIV_KLASORU`). Teslim paketi: arşiv tablolarının
+  `pg_dump`'ı + `arsiv/` klasörü + `KURULUM.md` (boş kuruluma geri yükleme adım adım) + SHA256 özetleri.
 
 ## Ekran ve roller
 
@@ -54,7 +81,7 @@ Sağlık kontrolü → sorun varsa yöneticiye UYARI, her pazartesi NABIZ maili
 | **Admin** | Kurtarma rolü: kullanıcı davet eder, parola linki gönderir, yanlış değişikliği geçmişten geri alır, ayarları ve API anahtarlarını yönetir. **Rapor onaylayamaz** (görev ayrılığı) |
 | **API kullanıcısı** | Dış geliştirici: panelde sadece API dokümanını görür, istek atmak için API anahtarı kullanır |
 
-Panel sayfaları: Raporlar (onay) · Alıcı grupları · Kaynaklar · Konular · Tarama · Kullanıcılar · Denetim kaydı · Ayarlar · API anahtarları.
+Panel sayfaları: Raporlar (onay) · Alıcı grupları · Kaynaklar · Konular · Tarama · Arşiv · Kullanıcılar · Denetim kaydı · Ayarlar · API anahtarları.
 Sol menü veritabanından gelir (`menu_ogeleri`), her kullanıcı yetkisine uyan öğeleri görür.
 
 **API:** Panelde yapılabilen her şey API'den de yapılır, şirket portalı bizim arayüz yerine bunu kullanabilir.
@@ -79,8 +106,9 @@ yeniden başlatma gerekmez. Panelde girilen değer `.env`'in önüne geçer. Mai
 | Dil, paket yönetimi | Python 3.12, uv |
 | Çekme, ayrıştırma | httpx, selectolax (Playwright sadece isteğe bağlı yedek tip) |
 | PDF, OCR | pdfplumber, pypdfium2, Tesseract (Türkçe) |
-| Veritabanı | PostgreSQL 16 (sunucu), SQLite (geliştirme), SQLAlchemy 2, Alembic (19 migration) |
-| Fark | difflib (madde bazında) |
+| Ekler | LibreOffice (doc/xls/ppt/rtf/odt), python-docx/openpyxl, 7-Zip / bsdtar (rar, 7z), zip |
+| Veritabanı | PostgreSQL 16 (sunucu, arama için GIN tam metin dizini), SQLite (geliştirme), SQLAlchemy 2, Alembic (22 migration) |
+| Fark | difflib (madde ve kelime bazında) |
 | Mail | smtplib, Jinja2 (HTML + düz metin) |
 | Backend | FastAPI (JSON API), imzalı HttpOnly çerez oturumu |
 | Panel | React, Vite, TypeScript, Tailwind 4 (derlenmiş `dist` depoda, sunucuda Node gerekmez) |
@@ -139,6 +167,14 @@ cd frontend && npm install && npm run dev  # arayüz geliştirme (5173, /api vek
 | `gonderim-durum --id N` | Durumu belirsiz kalan bir maili çözer |
 | `ayar-disa-aktar`, `ayar-ice-aktar` | Kaynak ve konu tanımlarını dosyaya yazar / dosyadan uygular |
 | `api-anahtari-uret`, `api-anahtari-listele`, `api-anahtari-iptal` | API anahtarı işlemleri (panel kullanılmıyorsa) |
+| `calistir`, `onizle` | Sadece tara (mail yok) / bekleyen kayıtlardan rapor önizlemesi (dosyaya) |
+| `izlenen` | Takipteki mevzuat, son kontrol, arşivdeki sürüm sayısı |
+| `arsiv-kur` | Arşiv işi (panelden de başlar); `--anahtar ...` sadece verilen mevzuat |
+| `arsiv-durum` | Tür başına kaç mevzuat |
+| `arsiv-degisim --gun 7` | Son günlerin değişiklikleri: RG/AYM notuyla doğrulandı mı, rapor kaydı açıldı mı |
+| `arsiv-kontrol [--sha]` | Teslim kontrolü (sadece okur), rapor `arsiv/kontrol/` altına |
+| `arsiv-dizin`, `arsiv-filtre` | Arama dizinini kurar / konu filtresini arşivin tamamına uygular (konular değişince zamanlayıcı kendisi başlatır) |
+| `filtre-olc` | Konu filtresini test setleriyle ölçer |
 
 ## Klasörler
 
@@ -148,9 +184,17 @@ src/mevzuat/
   gunluk.py            günlük iş: tara → onaya sun → sağlık
   pipeline.py          tarama motoru (checkpoint, kaynak başına yalıtım)
   sources/             kaynak tipleri: resmi_gazete, wordpress, gib, html, rss, tarayici
-  filtre.py            Türkçe normalizasyon, konu ve iş kolu eşleştirme
+  filtre.py            Türkçe normalizasyon, konu ve iş kolu eşleştirme, ortak dışlama
+  turkce_ek.py         Türkçe ek kuralı ("altın" → "altının" evet, "Altınbaş" hayır)
+  puan.py              bölüm ağırlıklı konu puanı (günlük tarama ve arşiv aynı)
   icerik.py, ocr.py    HTML / PDF / OCR
-  surum.py             mevzuat.gov.tr güncel metin takibi ve madde farkı
+  surum.py             güncel metin takibi: arşive çeker, madde farkı, değişen mevzuat kaydı
+  arsiv.py             arşiv işi (liste, metin, haftalık), panel verisi
+  arsiv_cekim.py       bir mevzuatın çekimi ve sürümlenmesi
+  html_okuma.py, pdf_okuma.py, ek_okuma.py, metin_duzen.py   okuyucular (yapı, OCR, ekler, metin onarımı)
+  arsiv_fark.py        iki sürümün madde ve kelime farkı
+  arama.py             arşivde tam metin arama, konu filtresinin arşive uygulanması
+  arsiv_kontrol.py     teslim kontrolü
   rapor.py, mail.py    rapor, onay akışı, dağıtım
   alicilar.py          alıcı grupları, kişi başı dağıtım planı
   kaynak_bulucu.py     adresten kaynak tipini ve seçicileri bulur
@@ -165,5 +209,9 @@ tests/                 testler ve gerçek sayfalardan alınmış örnekler
 
 ## Rakamlar
 
-5 kaynak (4 tarama + güncel metin) · 8 konu · 21 takip edilen mevzuat · 18 tablo · 19 migration · 441 test ·
+8 konu · 24 tablo · 22 migration · 550 test ·
 90 günlük gerçek veride 716 Resmî Gazete başlığından 85'i ilgili · Resmî Gazete PDF'lerinin %82'si taranmış görüntü.
+
+Arşiv (26.11.2026): 19.352 mevzuat (19.350'sinin metni; 3'ünü site vermiyor) · ~17 GB dosya (PDF 8,1 GB, sayfa görüntüleri
+4,5 GB, ekler 3,5 GB) · 41.883 dosya · 3.993 mevzuatta 28.561 OCR sayfası · arama dizininde 362 bin madde ·
+tam tarama sunucuda ~2 gün (istekler arası 1,5 sn).
