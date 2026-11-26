@@ -214,7 +214,7 @@
 /* Arşiv metin görünümü (html_okuma.py ve pdf_okuma.py'nin ürettiği güvenli HTML). "PDF'in içeriği gibi": başlıklar ortalı
    ve kalın, madde başı kalın, fıkralar paragraf, bentler girintili, tablolar çerçeveli, sayfa görüntüleri yerinde. */
 .arsiv-metin {
-  font-family: Georgia, 'Times New Roman', serif;
+  font-family: 'Times New Roman', Times, 'Liberation Serif', serif; font-variant-numeric: lining-nums;
   font-size: 14px;
   line-height: 1.65;
   color: #1c1917;
@@ -248,7 +248,7 @@
 .arsiv-metin section.excel-sayfasi h4, .arsiv-metin section.slayt h4 { font-family: system-ui, sans-serif; color: #57534e; }
 
 /* Sürüm farkı: eklenen yeşil altı çizili, silinen kırmızı üstü çizili, yerinde. */
-.arsiv-fark { font-family: Georgia, 'Times New Roman', serif; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; }
+.arsiv-fark { font-family: 'Times New Roman', Times, 'Liberation Serif', serif; font-variant-numeric: lining-nums; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; }
 .arsiv-fark ins { background: #d1fae5; color: #065f46; text-decoration: underline; text-decoration-color: #059669; }
 .arsiv-fark del { background: #ffe4e6; color: #9f1239; text-decoration: line-through; }
 

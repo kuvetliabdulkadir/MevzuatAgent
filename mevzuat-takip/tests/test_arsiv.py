@@ -379,6 +379,13 @@ def test_panel_arsiv_uclari(engine, site, tmp_path):
     assert r.json()["istek"]["secenekler"] == {"turler": ["Kanun"], "yeniden": False}
     assert _post(c, "/panel/api/arsiv/baslat", {}).status_code == 409
     assert _post(c, "/panel/api/arsiv/durdur").json()["istek"]["durum"] == "DURDURULDU"
+    # "Yeniden çek" (hepsini baştan) EVET onayı olmadan başlamaz; onayla başlar.
+    for onay in ({}, {"onay": ""}, {"onay": "evt"}):
+        r = _post(c, "/panel/api/arsiv/baslat", {"turler": ["Kanun"], "yeniden": True, **onay})
+        assert r.status_code == 400 and "EVET" in r.json()["detail"]
+    r = _post(c, "/panel/api/arsiv/baslat", {"turler": ["Kanun"], "yeniden": True, "onay": "evet"})
+    assert r.status_code == 200 and r.json()["istek"]["secenekler"]["yeniden"] is True
+    assert _post(c, "/panel/api/arsiv/durdur").json()["istek"]["durum"] == "DURDURULDU"
     with Session(engine) as s:
         assert {d.islem for d in s.scalars(select(Denetim))} >= {"arsiv_istegi", "arsiv_durdur"}
     # Arşiv dolunca liste, künye ve metin okunur.

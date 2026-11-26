@@ -31,7 +31,7 @@ h1{font-size:20px;margin:0 0 4px}.ust{color:#6b6b63;font-size:13px;margin-bottom
 .sayac{background:#fff;border:1px solid #e6e6e0;border-radius:6px;padding:10px 14px;font-size:14px;margin-bottom:16px}
 .bolum{background:#fff;border:1px solid #e6e6e0;border-left:4px solid #1f4e5a;border-radius:6px;padding:12px 14px;margin:10px 0}
 .bolum h2{font-size:14px;margin:0 0 6px}.tur{font-weight:normal;color:#6b6b63;font-size:12px;margin-left:6px}
-.metin{font-family:Georgia,serif;font-size:15px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.metin{font-family:"Times New Roman",Times,"Liberation Serif",serif;font-variant-numeric:lining-nums;font-size:15px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
 del{background:#fbe3df;color:#8a2b1d}ins{background:#dcf2e1;color:#1d5c2e;text-decoration:none;font-weight:600}
 .eski{color:#6b6b63;font-size:13px;margin-top:8px;border-top:1px dashed #e6e6e0;padding-top:6px}
 .not{color:#6b6b63;font-size:12px;margin-top:20px}a{color:#2f5d8a}

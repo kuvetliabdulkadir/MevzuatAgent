@@ -61,6 +61,9 @@ const IsKarti: React.FC<{
 }> = ({ durum, baslatabilir, suruyor, onDegisti, onGunluk }) => {
   const [secili, setSecili] = useState<string[]>(durum.turler.map((t) => t.kod));
   const [yeniden, setYeniden] = useState(false);
+  // "Yeniden çek" seçiliyken Başlat önce onay sorar: kullanıcı EVET yazmadan iş başlamaz (sunucu da onaysız reddeder).
+  const [onayAcik, setOnayAcik] = useState(false);
+  const [onay, setOnay] = useState('');
   const [hata, setHata] = useState('');
   const [bekliyor, setBekliyor] = useState(false);
   const { istek } = durum;
@@ -96,7 +99,7 @@ const IsKarti: React.FC<{
             <Square className="w-4 h-4" /> {istek?.durum === 'DURDURULUYOR' ? 'Duruyor…' : 'Durdur'}
           </button>
         ) : (
-          <button type="button" onClick={() => gonder('/arsiv/baslat', { turler: secili, yeniden })}
+          <button type="button" onClick={() => (yeniden ? (setOnay(''), setOnayAcik(true)) : gonder('/arsiv/baslat', { turler: secili, yeniden }))}
             disabled={bekliyor || !durum.zamanlayici_calisiyor || secili.length === 0}
             className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-petrol text-white font-semibold hover:bg-petrol-dark disabled:opacity-50 cursor-pointer shrink-0">
             <Play className="w-4 h-4" /> Başlat
@@ -120,6 +123,28 @@ const IsKarti: React.FC<{
             <input type="checkbox" className="mt-0.5" checked={yeniden} onChange={(e) => setYeniden(e.target.checked)} />
             <span>Arşivdekileri de yeniden çek <span className="text-stone-500">(değişen metnin yeni sürümü olur; seçilen türlerin hepsi baştan çekildiği için uzun sürer)</span></span>
           </label>
+        </div>
+      )}
+      {onayAcik && (
+        <div role="alertdialog" aria-label="Yeniden çekme onayı" className="border border-rose-300 bg-rose-50 rounded-lg p-3 space-y-2 text-rose-900">
+          <p className="font-semibold">Seçilen türlerdeki bütün mevzuat siteden baştan çekilecek.</p>
+          <p>
+            Seçili türler: {secili.map(turAdi).join(', ')}. Hepsi için 1-3 gün sürer, siteye on binlerce istek gider; iş sürerken
+            günlük takip arşive yazamaz, bulduğu değişiklikler iş bitince işlenir. Değişen metin yeni sürüm olur, veri silinmez.
+            Sadece yeni ve hatalı mevzuatı almak için bu kutuyu boş bırakın (haftalık işle aynı, ~15 dk).
+          </p>
+          <label className="flex flex-wrap items-center gap-2">
+            Devam etmek için <strong>EVET</strong> yazın:
+            <input value={onay} onChange={(e) => setOnay(e.target.value)} autoFocus
+              className="border border-rose-300 rounded px-2 py-1 bg-white w-24" />
+          </label>
+          <div className="flex gap-2">
+            <button type="button" disabled={onay.trim().toLocaleUpperCase('tr') !== 'EVET' || bekliyor}
+              onClick={() => { setOnayAcik(false); gonder('/arsiv/baslat', { turler: secili, yeniden, onay: onay.trim() }); }}
+              className="px-3 py-1.5 rounded bg-rose-700 text-white font-semibold disabled:opacity-40 cursor-pointer">Baştan çekmeyi başlat</button>
+            <button type="button" onClick={() => setOnayAcik(false)}
+              className="px-3 py-1.5 rounded border border-rose-300 cursor-pointer">Vazgeç</button>
+          </div>
         </div>
       )}
       {!durum.zamanlayici_calisiyor && <p className="text-rose-700">Zamanlayıcı çalışmadığı için arşiv işi başlatılamaz.</p>}

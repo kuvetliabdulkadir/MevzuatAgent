@@ -314,6 +314,8 @@ class ArsivBaslatIstegi(BaseModel):
     model_config = ConfigDict(json_schema_extra={"examples": [{"turler": ["Kanun"], "yeniden": False}]})
     turler: list[str] | None = Field(default=None, max_length=20)
     yeniden: bool = False
+    # "yeniden" seçili işte zorunlu: "EVET". Arşivdekilerin hepsini baştan çeker (1-3 gün), yanlışlıkla başlamasın.
+    onay: str = Field(default="", max_length=10)
 
 
 # "Önceki hale döndür" isteği.
@@ -1188,6 +1190,9 @@ def uygulama_olustur(
     def arsiv_baslat(request: Request, istek: ArsivBaslatIstegi):
         with Oturum() as db:
             kullanici = ayar_yetkisi(request, db)
+            if istek.yeniden and istek.onay.strip().upper() != "EVET":
+                raise HTTPException(400, "Arşivdekileri yeniden çekmek seçilen türlerin hepsini baştan çeker (1-3 gün). "
+                                         "Devam etmek için onay alanına EVET yazın.")
             try:
                 kayit = arsiv.istek_olustur(db, kullanici.id, istek.turler, istek.yeniden,
                                             zamanlama.zamanlayici_durumu(db)["zamanlayici_calisiyor"])
