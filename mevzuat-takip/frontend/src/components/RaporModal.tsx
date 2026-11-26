@@ -7,7 +7,7 @@ import { Gonderim, Kalem, Kullanici, Mesaj, RaporDetayi, RaporGrubu } from '../t
 import { dagitimPlani, epostaGecerliMi, grubunKalemleri } from '../dagitim';
 import { DurumRozeti, MesajKutusu } from '../bicim';
 import { tarihSaat } from '../tarih';
-import { MevzuatPenceresi } from '../pages/ArsivMevzuat';
+import { AyrintiliKarsilastirma, MevzuatPenceresi } from '../pages/ArsivMevzuat';
 
 // Pencereye verilen bilgiler.
 interface RaporModalProps {
@@ -283,14 +283,23 @@ export const RaporModal: React.FC<RaporModalProps> = ({ raporId, kullanici, onKa
 // bütün maddeleri (rapordaki parçalar kısaltılmış olabilir).
 const TamKarsilastirma: React.FC<{ anahtar: string; surum: number }> = ({ anahtar, surum }) => {
   const [acik, setAcik] = useState(false);
+  const [ayrinti, setAyrinti] = useState(false);
   return (
-    <>
-      <button type="button" onClick={() => setAcik(true)}
-        className="text-xs font-semibold text-petrol underline cursor-pointer">
-        Arşivde tam karşılaştırmayı aç (v{surum - 1} ↔ v{surum})
-      </button>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        {/* Kalemin içinde: değişen maddelerin tamamı, işaretli; sürüm seçilebilir, tam metin / yan yana. */}
+        <button type="button" onClick={() => setAyrinti((a) => !a)} aria-expanded={ayrinti}
+          className="text-xs font-semibold px-2.5 py-1 rounded border border-petrol text-petrol hover:bg-petrol/10 cursor-pointer">
+          {ayrinti ? 'Ayrıntılı karşılaştırmayı gizle' : 'Ayrıntılı göster (değişen maddelerin tamamı)'}
+        </button>
+        <button type="button" onClick={() => setAcik(true)}
+          className="text-xs font-semibold text-petrol underline cursor-pointer">
+          Arşivde aç (v{surum - 1} ↔ v{surum}; metin, ekler, PDF)
+        </button>
+      </div>
+      {ayrinti && <AyrintiliKarsilastirma anahtar={anahtar} surum={surum} />}
       {acik && <MevzuatPenceresi anahtar={anahtar} ilkSekme="degisiklik" ilkSurum={surum} onKapat={() => setAcik(false)} />}
-    </>
+    </div>
   );
 };
 

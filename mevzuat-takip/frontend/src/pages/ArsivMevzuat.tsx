@@ -259,16 +259,37 @@ const FARK_ADI: Record<string, { ad: string; renk: string }> = {
   ayni: { ad: '', renk: 'border-transparent' },
 };
 
+// Rapor penceresinde kalemin içinde açılan ayrıntılı karşılaştırma: arşivdeki Değişiklikler sekmesinin aynısı (sürüm
+// seçimi, sadece değişenler / tam metin / yan yana, değişiklikler arasında gezinme), ayrı pencere açmadan.
+export const AyrintiliKarsilastirma: React.FC<{ anahtar: string; surum: number }> = ({ anahtar, surum }) => {
+  const [detay, setDetay] = useState<ArsivDetayi | null>(null);
+  const [hata, setHata] = useState('');
+  useEffect(() => {
+    api.get<ArsivDetayi>(`/arsiv/mevzuat/${encodeURIComponent(anahtar)}`).then(setDetay).catch((e) => setHata(e.message));
+  }, [anahtar]);
+  if (hata) return <p className="text-rose-700 text-xs">{hata}</p>;
+  if (!detay) return <p className="text-stone-500 text-xs flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Yükleniyor…</p>;
+  return (
+    <div className="border border-paper-300 rounded-lg bg-white text-xs max-h-[70vh] overflow-y-auto">
+      <DegisiklikSekmesi anahtar={anahtar} detay={detay} secili={surum} onBuyut={(src) => window.open(src, '_blank', 'noopener')} />
+    </div>
+  );
+};
+
 const DegisiklikSekmesi: React.FC<{ anahtar: string; detay: ArsivDetayi; secili: number; onBuyut: (s: string) => void }> = ({ anahtar, detay, secili, onBuyut }) => {
   const [duzeltmeler, setDuzeltmeler] = useState(false);
   const adaylar = useMemo(() => [...detay.surumler].sort((a, b) => a.surum_no - b.surum_no)
     .filter((s) => duzeltmeler || s.surum_turu !== 'okuma_duzeltmesi' || s.surum_no === secili), [detay, duzeltmeler, secili]);
-  const varsayilanEski = useMemo(() => {
+  // Seçili sürüm bir öncekiyle karşılaştırılır. Öncesi yoksa (v1) bir sonrakiyle: v1 seçilince "v1 → v2" görünür,
+  // boş "iki farklı sürüm seçin" uyarısı çıkmaz.
+  const [varsayilanEski, varsayilanYeni] = useMemo(() => {
     const onceki = adaylar.filter((s) => s.surum_no < secili);
-    return onceki.length ? onceki[onceki.length - 1].surum_no : adaylar[0]?.surum_no;
+    if (onceki.length) return [onceki[onceki.length - 1].surum_no, secili];
+    const sonraki = adaylar.find((s) => s.surum_no > secili);
+    return [secili, sonraki ? sonraki.surum_no : secili];
   }, [adaylar, secili]);
   const [eski, setEski] = useState<number | undefined>(varsayilanEski);
-  const [yeni, setYeni] = useState<number>(secili);
+  const [yeni, setYeni] = useState<number>(varsayilanYeni);
   const [kip, setKip] = useState<'degisen' | 'tam' | 'yanyana'>('degisen');
   const [eskileriGizle, setEskileriGizle] = useState(false);
   const [fark, setFark] = useState<ArsivFarki | null>(null);
@@ -276,7 +297,7 @@ const DegisiklikSekmesi: React.FC<{ anahtar: string; detay: ArsivDetayi; secili:
   const [konum, setKonum] = useState(0);
   const kutular = useRef<(HTMLDivElement | null)[]>([]);
 
-  useEffect(() => { setYeni(secili); setEski(varsayilanEski); }, [secili, varsayilanEski]);
+  useEffect(() => { setYeni(varsayilanYeni); setEski(varsayilanEski); }, [varsayilanYeni, varsayilanEski]);
   useEffect(() => {
     if (eski === undefined || eski === yeni) { setFark(null); return; }
     setFark(null);
