@@ -10,6 +10,8 @@ from fastapi.routing import APIRoute
 # Dokümandaki grupların sırası ve açıklamaları.
 ETIKETLER = [
     {"name": "Mevzuat", "description": "Arama ve detay"},
+    {"name": "Arşiv", "description": "mevzuat.gov.tr arşivi (sadece okuma): liste, tam metin arama, sürümler, metin, "
+                                     "iki sürümün farkı, son değişiklikler, ekler ve PDF'ler"},
     {"name": "Raporlar", "description": "Okuma, onay, ret, ek gönderim"},
     {"name": "Konular", "description": "Kategoriler ve anahtar kelimeler"},
     {"name": "Kaynaklar", "description": "Taranan siteler"},

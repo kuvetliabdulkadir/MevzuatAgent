@@ -489,7 +489,7 @@ def test_api_dokumani_giris_ister_ve_csp_ile_uyumlu(migrasyonlu):
     assert "/panel/api/gruplar" not in sema["paths"] and "/panel/api/raporlar/{rapor_id}/karar" not in sema["paths"]
     gruplar_cevabi = sema["paths"]["/api/gruplar"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert gruplar_cevabi == {"$ref": "#/components/schemas/GrupListesi"}
-    assert [e["name"] for e in sema["tags"]] == ["Mevzuat", "Raporlar", "Konular", "Kaynaklar", "Alıcı grupları", "Tarama",
+    assert [e["name"] for e in sema["tags"]] == ["Mevzuat", "Arşiv", "Raporlar", "Konular", "Kaynaklar", "Alıcı grupları", "Tarama",
                                                  "Kullanıcılar", "Ayarlar", "Denetim kaydı", "Portal"]
     # Her panel uç noktası belgeli: Türkçe başlık, yetki satırı, hata cevapları.
     for yol, islemler in sema["paths"].items():

@@ -68,6 +68,23 @@ ortam değişkenleriyle).
 
 Kaynak, konu, alıcı grubu, kullanıcı ve ayar işlemleri de `/api` altında, hepsi dokümanda.
 
+### Arşiv (mevzuat.gov.tr'deki yürürlükteki bütün mevzuat, sadece okuma)
+
+| İstek | Ne verir |
+|---|---|
+| `GET /api/arsiv/mevzuat` | Arşiv listesi. `q` (adında ya da anahtarında), `tur`, `konu` (`*` herhangi bir konu), `surum` (`v2`: bir kez değişmiş, `son7`: son 7 günde değişen …), `durum`, `sayfa`, `adet` (en fazla 200) |
+| `GET /api/arsiv/surumler` | Sürüm süzgecinin seçenekleri, sayılarıyla (veriden) |
+| `GET /api/arsiv/ara?q=...` | Metinlerde tam metin arama; bulunduğu maddeler ve `<mark>` ile vurgulu parçalar. `"ifade"`, `kelime*` |
+| `GET /api/arsiv/degisiklikler?gun=7` | Son değişiklikler: hangi maddeler değişti, yeni RG/AYM notuyla doğrulandı mı, rapora girdi mi |
+| `GET /api/arsiv/mevzuat/{anahtar}` | Künye, sürümler (v1, v2 …, ekleriyle), ilgili konuların kanıtı |
+| `GET /api/arsiv/mevzuat/{anahtar}/metin?surum=N` | Bir sürümün düz metni (verilmezse son sürüm) |
+| `GET /api/arsiv/mevzuat/{anahtar}/fark?eski=1&yeni=2` | İki sürümün madde madde farkı; değişen maddede silinen `<del>`, eklenen `<ins>` |
+| `GET /api/arsiv/mevzuat/{anahtar}/pdf?surum=N` | Sürümün PDF'i (sitenin PDF'i) |
+| `GET /api/arsiv/dosya/{sha256}` | Ek dosyasının kendisi (orijinal adıyla); `.../metin` okunmuş metni |
+
+`anahtar` mevzuat.gov.tr numarasıdır (`tür.tertip.no`, ör. `7.5.38527`). HTML içeren alanlar (`parca`, `html`) kaçışlıdır,
+sadece `<mark>`, `<ins>`, `<del>` etiketleri içerir; portal bunları olduğu gibi gösterebilir.
+
 Ne yapılabileceğini anahtarın rolü belirler. **Onaylayıcı** rapor onaylar ama ayarlara giremez, **Yönetici** ayarları
 yönetir ama rapor onaylayamaz, **Tam yetki** her şeyi yapar (test ve entegrasyon için).
 

@@ -70,6 +70,8 @@ Sağlık kontrolü → sorun varsa yöneticiye UYARI, her pazartesi NABIZ maili
   "elle bak" diye listeler; `arsiv-kontrol` teslim kontrolü (eksik dosya, okunamayan sayfa, kusurlu kayıt).
 - **Rapordan karşılaştırma:** mailde "Değişikliklerin tamamını gör" bağlantısı girişsiz açılır, MEVZUAT_GIZLI_ANAHTAR ile
   imzalıdır (adres değiştirilirse açılmaz).
+- **Portal için API:** `/api/arsiv/...` (imzalı anahtarla, sadece okuma): liste ve süzgeçler, tam metin arama, sürümler,
+  metin, iki sürümün farkı, son değişiklikler, ekler ve PDF'ler. Ayrıntı: [deploy/PORTAL-BAGLANTI.md](deploy/PORTAL-BAGLANTI.md).
 - **Taşınabilir:** dosya yolları arşiv klasörüne göreli (`MEVZUAT_ARSIV_KLASORU`). Teslim paketi: arşiv tablolarının
   `pg_dump`'ı + `arsiv/` klasörü + `KURULUM.md` (boş kuruluma geri yükleme adım adım) + SHA256 özetleri.
 

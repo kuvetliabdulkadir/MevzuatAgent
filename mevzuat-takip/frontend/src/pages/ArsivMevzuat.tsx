@@ -61,11 +61,17 @@ export const MevzuatPenceresi: React.FC<{
       .then((d) => {
         setDetay(d);
         const istenen = d.surumler.find((s) => s.surum_no === ilkSurum);
-        setSurumNo(istenen?.surum_no ?? d.surumler[0]?.surum_no ?? null);
+        // Mevzuat en az bir kez gerçekten değiştiyse (okuma düzeltmesi sayılmaz) pencere doğrudan Değişiklikler'de,
+        // son değişiklik sürümü ile bir önceki karşılaştırılmış açılır; hiç değişmediyse Metin'de, son sürümle.
+        // Açan yer (rapor, süzgeç) sekme ya da sürüm verdiyse o geçerli. surumler yeniden eskiye sıralı.
+        const sonDegisiklik = d.surumler.find((s) => s.surum_turu === 'degisiklik');
+        const degisiklikte = !ilkSekme && !!sonDegisiklik && d.surumler.length > 1;
+        setSurumNo(istenen?.surum_no ?? (degisiklikte ? sonDegisiklik.surum_no : d.surumler[0]?.surum_no) ?? null);
         if (d.surumler.length < 2) setSekme('metin');
+        else if (degisiklikte) setSekme('degisiklik');
       })
       .catch((e) => setHata(e.message));
-  }, [anahtar, ilkSurum]);
+  }, [anahtar, ilkSurum, ilkSekme]);
   useEffect(() => {
     const tus = (e: KeyboardEvent) => { if (e.key === 'Escape') { if (buyuk) setBuyuk(null); else onKapat(); } };
     window.addEventListener('keydown', tus);

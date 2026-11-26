@@ -511,6 +511,10 @@ def portal_api(oturum: Callable[[], Session], giris_gerekli: Callable, guvenlik_
                         for k in rapor_modulu.rapor_kayitlari(db, r)]
             return {**_rapor_ozeti(r), "karar_notu": r.karar_notu, "kalemler": kalemler}
 
+    # mevzuat.gov.tr arşivi (sadece okuma): /api/arsiv/... (web/portal_arsiv.py)
+    from mevzuat.web.portal_arsiv import portal_arsiv_api
+
+    api.include_router(portal_arsiv_api(oturum, kimlik))
     return api
 
 

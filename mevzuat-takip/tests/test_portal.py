@@ -317,3 +317,78 @@ def test_panel_adresleri_aynen_calisir(ortam):
     assert client.get("/panel/api/gruplar").json()["gruplar"][0]["adresler"] == ["gizli-adres@firma.com"]
     assert "toplam_kayit" in client.get("/panel/api/kaynaklar").json()["kaynaklar"][0]
     assert "toplam_kayit" not in client.get("/api/kaynaklar").json()[0]
+
+
+# --- arşiv (/api/arsiv, sadece okuma) ---------------------------------------------------------------------------------
+
+@pytest.fixture
+def arsivli(ortam, tmp_path, monkeypatch):
+    """Arşive iki sürümlü bir mevzuat, bir ek dosyası ve diskte dosyası."""
+    from mevzuat.db import ArsivDosyasi, ArsivMevzuat, ArsivSurumu
+
+    monkeypatch.setenv("MEVZUAT_ARSIV_KLASORU", str(tmp_path))
+    (tmp_path / "ekler" / "7.5.1").mkdir(parents=True)
+    ek = tmp_path / "ekler" / "7.5.1" / "ek.doc"
+    ek.write_bytes(b"ek dosyasinin kendisi")
+    sha = "a" * 64
+    client, *_ = ortam
+    with Session(client.app.state.engine) as s:
+        s.add(ArsivMevzuat(anahtar="7.5.1", tur="TumYonetmelik", ad="KUYUM TİCARETİ HAKKINDA YÖNETMELİK", url="https://m/1",
+                           rg_tarihi=date(2021, 4, 14), rg_sayisi=31454, bicim="html", ilk_gorulme=SIMDI,
+                           son_gorulme=SIMDI, durum="TAMAM", surum_sayisi=2))
+        ortak = dict(anahtar="7.5.1", okuma="html", ozet="x" * 64, kaynak_ozeti="y" * 64, kalite="temiz")
+        s.add_all([
+            ArsivSurumu(surum_no=1, cekildi=SIMDI - timedelta(days=5), surum_turu="ilk",
+                        metin="MADDE 1 – Amaç yazılır. MADDE 6 – Esnaf odasına kayıtlı olunması gerekir.", **ortak),
+            ArsivSurumu(surum_no=2, cekildi=SIMDI, surum_turu="degisiklik", rg_notlari=[{"tarih": "1/10/2026", "sayi": "33387"}],
+                        metin="MADDE 1 – Amaç yazılır. MADDE 6 – (Değişik:RG-1/10/2026-33387) Meslek odasına kayıtlı "
+                              "olunması gerekir.",
+                        ekler=[{"ad": "ek.doc", "sha256": sha, "boyut": 21, "bicim": "doc", "durum": "indi",
+                                "yol": "ekler/7.5.1/ek.doc"}], **ortak),
+            ArsivDosyasi(sha256=sha, ad="ek.doc", bicim="doc", boyut=21, yol="ekler/7.5.1/ek.doc", durum="tamam",
+                         metin="Ekin okunmuş metni", islendi=SIMDI),
+        ])
+        s.commit()
+    return client
+
+
+def test_api_arsiv_liste_detay_metin_fark(arsivli):
+    c = arsivli
+    r = c.get("/api/arsiv/mevzuat", params={"q": "kuyum"})
+    assert r.status_code == 200 and r.json()["toplam"] == 1
+    k = r.json()["kayitlar"][0]
+    assert k["anahtar"] == "7.5.1" and k["degisiklik_sayisi"] == 1 and k["rg_sayisi"] == 31454
+    assert c.get("/api/arsiv/mevzuat", params={"surum": "v2"}).json()["toplam"] == 1
+    assert c.get("/api/arsiv/mevzuat", params={"surum": "v1"}).json()["toplam"] == 0
+    assert c.get("/api/arsiv/mevzuat", params={"surum": "yanlis"}).status_code == 400
+    assert [s["kod"] for s in c.get("/api/arsiv/surumler").json()["surumler"]] == ["v2"]
+
+    d = c.get("/api/arsiv/mevzuat/7.5.1").json()
+    assert [s["surum_no"] for s in d["surumler"]] == [2, 1] and d["degisiklik_sayisi"] == 1
+    assert d["surumler"][0]["ekler"][0]["sha256"] == "a" * 64
+    assert "yol" not in d["surumler"][0]["ekler"][0]  # sunucudaki dosya yolu dışarı sızmaz
+    assert c.get("/api/arsiv/mevzuat/yok").status_code == 404
+
+    assert "Meslek odasına" in c.get("/api/arsiv/mevzuat/7.5.1/metin").json()["metin"]
+    assert "Esnaf odasına" in c.get("/api/arsiv/mevzuat/7.5.1/metin", params={"surum": 1}).json()["metin"]
+    f = c.get("/api/arsiv/mevzuat/7.5.1/fark", params={"eski": 1, "yeni": 2}).json()
+    assert f["sayac"]["degisti"] == 1
+    madde6 = next(b for b in f["bolumler"] if b["bolum"] == "Madde 6")
+    assert "<del>Esnaf</del>" in madde6["html"] and "Meslek</ins>" in madde6["html"]
+    assert c.get("/api/arsiv/mevzuat/7.5.1/fark", params={"eski": 1, "yeni": 9}).status_code == 404
+
+
+def test_api_arsiv_degisiklikler_dosya_ve_kimlik(arsivli):
+    c = arsivli
+    son = c.get("/api/arsiv/degisiklikler", params={"gun": 365}).json()
+    assert son[0]["anahtar"] == "7.5.1" and son[0]["durum"] == "dogrulandi"
+    r = c.get(f"/api/arsiv/dosya/{'a' * 64}")
+    assert r.status_code == 200 and r.content == b"ek dosyasinin kendisi" and "ek.doc" in r.headers["content-disposition"]
+    assert c.get(f"/api/arsiv/dosya/{'a' * 64}/metin").json()["metin"] == "Ekin okunmuş metni"
+    assert c.get(f"/api/arsiv/dosya/{'b' * 64}").status_code == 404
+    assert c.get("/api/arsiv/dosya/..%2F..%2Fetc%2Fpasswd").status_code == 404
+    # Anahtarsız istek reddedilir; dokümanda "Arşiv" grubu var.
+    anahtarsiz = TestClient(c.app)
+    assert anahtarsiz.get("/api/arsiv/mevzuat").status_code == 401
+    yollar = c.get("/api/dokuman/openapi.json").json()["paths"]
+    assert {"/api/arsiv/mevzuat", "/api/arsiv/ara", "/api/arsiv/mevzuat/{anahtar}/fark"} <= yollar.keys()
