@@ -89,6 +89,63 @@ def cop_orani(metin: str) -> tuple[float, int]:
     return 1 - iyi / len(parcalar), len(parcalar)
 
 
+# --- okunamayan satırlar (rapor gösterimi) -------------------------------------------------------------
+# OCR'da tablo işaret kutuları, damga ve resimler harf yığınına döner ("Biodizel Türleri ,*|*|*<(«(«c«c 00",
+# EPDK kurul kararı, RG 28.11.2026). Metinde kalabilir (arama, puan), ama raporda cümle diye gösterilmez.
+# Ölçüm (sunucu, 2026-11-28): OCR'lı kayıtlarda 19.498 satırdan 21'i, HTML/yazılı metinde 0, arşivde 2,8 milyon
+# satırdan ~3.400'ü (taranmış tablo, harita, GTİP listesi) işaretlendi. "*" (dipnot, "**" tablo hücresi, koordinatta
+# derece işareti) ve «tırnaklı» kelimeler sayılmaz.
+_OLAGAN_ISARET = frozenset(".,;:!?()[]-–—/'\"“”‘’%§&|°+=_#@$€₺…•·*")
+_TIRNAKLI = re.compile(r"«[^«»\n]{2,}»")
+_NOKTALAMA_YIGINI = re.compile(r"[.,:;]{7,}")
+_ROMEN = re.compile(r"[IVXL]+")
+OKUNAMAYAN = "[Okunamayan bölüm (tablo ya da görsel), ekteki belgeye bakın]"
+
+
+def bozuk_satir_mi(satir: str) -> bool:
+    """Harf, rakam ve olağan noktalama dışındaki işaretler en az 3 tane ve dolu karakterlerin %6'sı kadarsa."""
+    dolu = [c for c in _TIRNAKLI.sub("", satir) if not c.isspace()]
+    tuhaf = sum(1 for c in dolu if not (c.isalnum() or c in _OLAGAN_ISARET))
+    return tuhaf >= 3 and tuhaf / len(dolu) >= 0.06
+
+
+# "..,....,..,.,.," gibi virgül-nokta yığını (taranmış tablodaki noktalı çizgi) silinir; sadece noktadan oluşan
+# içindekiler çizgisi ("Madde 1 ........ 3") kalır.
+def _noktalama_yiginsiz(satir: str) -> str:
+    return _NOKTALAMA_YIGINI.sub(
+        lambda m: "" if m.group().count(",") >= 2 and m.group().count(".") >= 2 else m.group(), satir)
+
+
+def _kisa_gurultu(satir: str) -> bool:
+    s = satir.strip()
+    return 0 < len(s) <= 3 and s.isalpha() and not _ROMEN.fullmatch(s)
+
+
+def okunamayanlari_ayikla(metin: str, ocr: bool = False) -> str:
+    """Bozuk satırların yerine (art arda olanlar tek) OKUNAMAYAN notu konur. OCR metninde boş satırla ayrılmış 1-3
+    harflik satırlar ("GEZ", "O", "ES": damga, kenar çizgisi) da atılır."""
+    satirlar = [_noktalama_yiginsiz(s) for s in metin.split("\n")]
+    cikti: list[str] = []
+    blokta = bos_atlandi = False
+    for i, s in enumerate(satirlar):
+        if bozuk_satir_mi(s):
+            if not blokta:
+                cikti.append(OKUNAMAYAN)
+            blokta = True
+            continue
+        bos_komsu = (i == 0 or not satirlar[i - 1].strip()) or (i + 1 == len(satirlar) or not satirlar[i + 1].strip())
+        if ocr and _kisa_gurultu(s) and (blokta or bos_komsu):
+            continue
+        if blokta and not s.strip():
+            bos_atlandi = True
+            continue
+        if blokta and bos_atlandi:
+            cikti.append("")
+        blokta = bos_atlandi = False
+        cikti.append(s)
+    return "\n".join(cikti)
+
+
 # NFC, kontrol karakterleri, yedek karakter dışında temel temizlik. Satır yapısına dokunmaz.
 def temizle(metin: str) -> str:
     metin = unicodedata.normalize("NFC", metin or "")

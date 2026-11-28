@@ -1019,3 +1019,25 @@ def test_mevzuat_hakkinda_amacsiz_kanunda_birinci_madde():
              "üzerindeki tasarruf hakkının devridir.")
     assert hakkinda_satirlari(metin)[0][0] == "1. madde"
     assert hakkinda_satirlari("Duyuru metni, madde yok.") == []
+
+
+# Taranmış tablodaki işaret kutuları OCR'da harf yığını olur (EPDK kurul kararı, RG 28.11.2026): öne çıkan cümle ve
+# metin taslağına girmez, yerine tek "okunamayan bölüm" notu konur; anlamlı satırlar kalır.
+def test_ocr_copu_rapora_girmez():
+    metin = (
+        "MADDE 1- Bu tarife kapsamında petrollere depolama hizmeti verilmesine ilişkin usul ve esasları kapsar:\n\n"
+        "Tesiste aşağıdaki petroller* depolanacaktır.\n"
+        ".YakitNafta.'*<<<cC (0\nGEZ\nO\n\n"
+        "Biodizel Türleri ,*|*|*|*<(«(«(«c«c«c«coc0c 00\n\n"
+        "Deniz Motorini Türleri *|*|*£(£«c«c |\n\n"
+        "(*) Depolanacak petroller (x) ile işaretlenecektir.\n\nVE\n\nA\nES\n\n"
+        "MADDE 5- Lisans sahibi; benzin ve motorin için 5.000 m3 den az ise talebi ret eder.\n"
+        "«Motorin» türleri | ** | ** | İstanbul\n"
+    )
+    k = rapor._kalem(1, _kayit(icerik=metin, icerik_durumu="OCR_ILE_OKUNDU",
+                               eslesmeler={"Araç": ["motorin (içerikte)", "benzin (içerikte)"]}))
+    assert k.metin.count("[Okunamayan bölüm") == 1
+    assert "«c«c" not in k.metin and "GEZ" not in k.metin and "\nES\n" not in k.metin
+    assert "(*) Depolanacak petroller" in k.metin and "«Motorin» türleri | ** | ** | İstanbul" in k.metin
+    assert all("«c" not in c and "Okunamayan" not in c for c in k.one_cikanlar)
+    assert any(c.startswith("Lisans sahibi; benzin") or "benzin ve motorin" in c for c in k.one_cikanlar)

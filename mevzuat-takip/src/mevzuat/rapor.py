@@ -23,6 +23,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from mevzuat import alicilar, surum
+from mevzuat.metin_duzen import OKUNAMAYAN, okunamayanlari_ayikla
 from mevzuat.db import Gonderim, Kayit, KonuTanimi, Rapor
 from mevzuat.filtre import TUM_DUYURULAR, tr_kucuk
 from mevzuat.mail import Ek, Mail, MailGonderici
@@ -165,6 +166,8 @@ def _cumleler(metin: str) -> list[str]:
     # Kalıptaki geriye bakma kısmı, "G.T.İ.P." gibi tek harfli kısaltmalardaki noktada bölmeyi engeller.
     # "(Sıra No: 599)", "Sayı: 12" gibi numara etiketlerindeki iki nokta da cümle sonu değildir (GİB, MASAK duyuruları).
     parcalar = re.split(r"(?<=[.;:])(?<!\b\w\.)(?<![Nn]o:)(?<![Ss]ayı:)\s+(?!\d)|\s+(?=MADDE \d)", duz)
+    # Okunamayan bölüm notu cümle değildir, iki yanındaki metni de tek cümleye bağlamaz.
+    parcalar = [p for c in parcalar for p in c.split(OKUNAMAYAN)]
     return [c.strip() for c in parcalar if c.strip()]
 
 
@@ -495,6 +498,8 @@ def _kalem(no: int, kayit: Kayit, session: Session | None = None) -> RaporKalemi
         )
     # Metni temizle (adresleri sil, fazla boş satırları azalt).
     metin = linksiz((kayit.icerik or "").replace("\r\n", "\n").strip())
+    # OCR'da harf yığınına dönen tablo/görsel satırları ayıklanır (özet, öne çıkan cümle ve metin taslağı için).
+    metin = okunamayanlari_ayikla(metin, ocr=kayit.icerik_durumu == "OCR_ILE_OKUNDU")
     metin = re.sub(r"\n{3,}", "\n\n", metin) or None
     # Özet cümlesi ve (özetle aynı olmayan, başlığı tekrarlamayan) en fazla 2 öne çıkan cümle.
     ozet = ozet_cumlesi(metin, kayit.baslik) if metin else None
