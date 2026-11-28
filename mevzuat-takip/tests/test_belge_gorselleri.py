@@ -20,11 +20,15 @@ FIXTURES = Path(__file__).parent / "fixtures"
 PAROLA = "dogru-parola-123"
 
 
-def _sayfa(cizgiler: list[int], genislik=2000, yukseklik=2800) -> Image.Image:
+def _sayfa(cizgiler: list[int], genislik=2000, yukseklik=2800, dikey=True) -> Image.Image:
     resim = Image.new("RGB", (genislik, yukseklik), "white")
     c = ImageDraw.Draw(resim)
     for y in cizgiler:
         c.line([(200, y), (1800, y)], fill="black", width=3)
+    if dikey and len(cizgiler) > 1:
+        for x in (200, 1200, 1800):  # tablonun kenarları ve sütun ayracı (ilk ve son yatay çizgi arası)
+            c.line([(x, cizgiler[0]), (x, cizgiler[-2] if cizgiler[-1] - cizgiler[-2] > 500 else cizgiler[-1])],
+                   fill="black", width=3)
     # Yazı satırları (çizgi sayılmamalı): kısa koyu parçalar.
     for y in range(100, 2700, 60):
         for x in range(200, 1700, 90):
@@ -40,6 +44,8 @@ def test_cizgili_tablo_bulunur_tek_cizgi_tablo_degil():
     assert abs(ust - 1000) <= 3 and abs(alt - 1180) <= 3 and sol <= 220 and sag >= 1780
     # Sayfa çerçevesi (üst ve alt kenar) tablo sayılmaz.
     assert bg.cizgili_tablolar(_sayfa([50, 1400, 2750])) == []
+    # Altı çizili paragraf: art arda yatay çizgiler ama dikey çizgi yok (AYM kararı, RG 28.11.2026).
+    assert bg.cizgili_tablolar(_sayfa([1000, 1060, 1120, 1180], dikey=False)) == []
 
 
 def test_taranmis_belgede_tablo_goruntusu(monkeypatch):

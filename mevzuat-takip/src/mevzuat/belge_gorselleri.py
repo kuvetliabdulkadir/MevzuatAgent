@@ -33,6 +33,7 @@ GORUNTU_GENISLIGI = 1000  # piksel, mail okunur kalsın, şişmesin
 OCR_DPI = 300
 TABLO_DPI = 150
 PAY = 6  # kesilen bölgenin kenar payı (300 DPI piksel)
+BIRLESME_PAYI = 60  # bu kadar yakın iki bölge birleşir (300 DPI piksel, 0,2 inç)
 
 
 @dataclass
@@ -175,7 +176,8 @@ def bozuk_bolgeler(satirlar: list[_Satir]) -> list[tuple[int, int]]:
 
 # Taranmış sayfadaki çizgili tablo: uzun yatay çizgiler. Görüntü yatayda 1/16'ya küçültülür (kutu ortalaması),
 # çizgi üstündeki hücreler koyu kalır, yazı açılır. Satırın en uzun koyu dizisi metin genişliğinin %30'unu geçiyorsa
-# çizgidir. Aralarında en fazla 0,6 inç olan en az 3 çizgi bir tablodur (başlık altındaki tek çizgi, çift çizgi değil).
+# çizgidir. Aralarında en fazla 0,6 inç olan en az 3 çizgi, en az 2 dikey çizgiyle bir tablodur (başlık altındaki
+# tek çizgi, çift çizgi, altı çizili paragraf değil).
 CIZGI_ADIMI = 16
 CIZGI_ORANI = 0.30
 CIZGI_ARALIGI = int(OCR_DPI * 0.6)
@@ -224,8 +226,47 @@ def cizgili_tablolar(resim: Image.Image) -> list[tuple[int, int, int, int]]:
         if alt - ust > resim.height * 0.75:
             continue
         sol, sag = min(c[1] for c in g) * CIZGI_ADIMI, max(c[2] for c in g) * CIZGI_ADIMI
-        kutular.append((sol, ust, min(resim.width, sag + CIZGI_ADIMI), alt))
+        kutu = (sol, ust, min(resim.width, sag + CIZGI_ADIMI), alt)
+        if _dikey_cizgi_sayisi(gri, kutu) >= EN_AZ_DIKEY:
+            kutular.append(kutu)
     return kutular
+
+
+# Altı çizili satırlar da art arda yatay çizgi verir (AYM kararı, RG 28.11.2026); tablo ayrıca dikey çizgi ister:
+# kutunun yüksekliğinin en az yarısı boyunca kesintisiz koyu giden sütun. Taramadaki eğiklik çizgiyi yan sütuna
+# kaydırır, o yüzden 8 piksellik sütun grupları ve 4 satırlık kesinti hoş görülür. Yazı satırları arasındaki boşluk
+# bundan büyüktür, yazı dikey çizgi gibi görünmez.
+EN_AZ_DIKEY = 2
+DIKEY_ORANI = 0.5
+DIKEY_GRUP = 8
+DIKEY_KESINTI = 4
+
+
+def _dikey_cizgi_sayisi(gri: Image.Image, kutu: tuple[int, int, int, int]) -> int:
+    sol, ust, sag, alt = kutu
+    parca = gri.crop((max(0, sol - DIKEY_GRUP), ust, min(gri.width, sag + DIKEY_GRUP), alt + 1))
+    if parca.height < 2:
+        return 0
+    gen = max(1, parca.width // DIKEY_GRUP)
+    veri = parca.resize((gen, parca.height), Image.BOX).tobytes()
+    gereken = parca.height * DIKEY_ORANI
+    sayi, onceki = 0, False
+    for x in range(gen):
+        en_uzun = sayac = bosluk = 0
+        for y in range(parca.height):
+            if veri[y * gen + x] >= 255 // DIKEY_GRUP:  # grupta en az bir koyu piksel
+                sayac += bosluk + 1 if sayac else 1
+                bosluk = 0
+                en_uzun = max(en_uzun, sayac)
+            elif sayac:
+                bosluk += 1
+                if bosluk > DIKEY_KESINTI:
+                    sayac = bosluk = 0
+        cizgi = en_uzun >= gereken
+        if cizgi and not onceki:
+            sayi += 1
+        onceki = cizgi
+    return sayi
 
 
 def _ust_uste(a: tuple[int, int], b: tuple[int, int]) -> bool:
@@ -253,7 +294,8 @@ def _ocr_bolgeleri(veri: bytes, sayfalar: list[int], tsv_sayfalari: set[int]) ->
                                              sol, sag, False))
                 birlesik: list[list] = []
                 for b in sorted(bolgeler):
-                    if birlesik and _ust_uste((b[0], b[1]), (birlesik[-1][0], birlesik[-1][1])):
+                    # Üst üste binen ya da arası 0,2 inçten az bölgeler (aynı tablonun parçaları) tek görüntü.
+                    if birlesik and _ust_uste((b[0] - BIRLESME_PAYI, b[1]), (birlesik[-1][0], birlesik[-1][1])):
                         o = birlesik[-1]
                         birlesik[-1] = [o[0], max(o[1], b[1]), min(o[2], b[2]), max(o[3], b[3]), o[4] or b[4]]
                     else:
