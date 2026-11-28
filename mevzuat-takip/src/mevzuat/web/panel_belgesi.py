@@ -246,7 +246,17 @@ BELGE: dict[tuple[str, str], tuple[str, str, str, dict]] = {
                                                  "içindekiler, okunamadıysa nedeni.", HERKES, {**H401, **H404}),
     ("GET", "/panel/api/arsiv/goruntu"): ("Sayfa görüntüsü", "PDF'ten kesilmiş sayfa ya da tablo görüntüsü (harita, taranmış tablo), `yol` ile.",
                                     HERKES, {**H401, **H404}),
-    ("GET", "/panel/api/arsiv/gunluk/{istek_id}"): ("Arşiv işinin günlüğü", "İşin özeti (sonuçlara göre sayılar, kusurlular, hatalar, en "
+    ("GET", "/panel/api/arsiv/rapor-belgeleri"): ("Rapora giren diğer belgeler", "Arşiv türü olmayan ama rapora giren belgeler "
+                                            "(Resmî Gazete kurul kararı, ilan, duyuru…), yeniden eskiye. `q` başlıkta, kaynakçada "
+                                            "ve tam metinde aranır (bütün kelimeler); metinde bulunduysa vurgulu parça döner.",
+                                            HERKES, H401),
+    ("GET", "/panel/api/arsiv/rapor-belgeleri/{kayit_id}"): ("Rapora giren belge", "Tam metni (okunamayan satırlar ayıklanmış), "
+                                                       "tablo ve görselleri, kaynakçası, girdiği rapor.", HERKES, {**H401, **H404}),
+    ("GET", "/panel/api/kayit-gorseli/{gorsel_id}"): ("Belgedeki tablo/görselin görüntüsü", "Rapora giren belgeden kesilmiş "
+                                               "taranmış tablo ya da okunamayan bölüm (PNG).", HERKES, {**H401, **H404}),
+    ("GET", "/panel/api/kayit-belgesi/{kayit_id}"): ("Rapora giren belgenin PDF kopyası", "Belge alındığı anda saklanan PDF. "
+                                              "`indir=1` ise indirilir, değilse tarayıcıda açılır.", HERKES, {**H401, **H404}),
+    ("GET", "/panel/api/arsiv/gunluk/{istek_id}"):("Arşiv işinin günlüğü", "İşin özeti (sonuçlara göre sayılar, kusurlular, hatalar, en "
                                               "yavaşlar) ve mevzuat başına kayıtlar (adımlar, süreler, uyarılar). `sadece=hata|uyari`.",
                                               HERKES, {**H401, **H404}),
     # --- kullanıcılar ve denetim

@@ -36,6 +36,7 @@ class Ek:
     # Dosyanın kendisi (ham baytlar).
     icerik: bytes
     mime: str  # "application/pdf", "text/html" …
+    cid: str | None = None  # gömülü görsel (HTML'de <img src="cid:…">), ek listesinde görünmez
 
 
 # Gönderilecek bir mailin bütün parçaları.
@@ -48,6 +49,7 @@ class Mail:
     alicilar: list[str]
     ekler: list[Ek] = field(default_factory=list)
     message_id: str | None = None  # verilirse sabit, aynı rapor iki kez giderse alıcıda tek mail görünür
+    gomulu: list[Ek] = field(default_factory=list)  # HTML'in içinde gösterilen görseller (cid'li)
 
 
 # "Mail gönderebilen her şey" kuralı, gonder(mail) fonksiyonu olsun yeter. SMTP de dosya yazıcı da buna uyuyor.
@@ -67,6 +69,13 @@ def mesaj_olustur(mail: Mail, gonderen: str) -> EmailMessage:
     # Önce düz metin hali, sonra "alternatif" olarak HTML hali (mail programı uygun olanı gösterir).
     msg.set_content(mail.metin)
     msg.add_alternative(mail.html, subtype="html")
+    # Gömülü görseller HTML parçasına bağlanır (multipart/related), mail programı onları metnin içinde gösterir.
+    if mail.gomulu:
+        html_parcasi = msg.get_payload()[-1]
+        for g in mail.gomulu:
+            ana, alt = g.mime.split("/", 1)
+            html_parcasi.add_related(g.icerik, maintype=ana, subtype=alt, cid=f"<{g.cid}>", filename=g.dosya_adi,
+                                     disposition="inline")
     # Ekleri tek tek ekle. "application/pdf" yazısı ana tür ve alt tür diye ikiye ayrılıyor.
     for ek in mail.ekler:
         ana, alt = ek.mime.split("/", 1)

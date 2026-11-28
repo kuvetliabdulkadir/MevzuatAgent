@@ -8,6 +8,7 @@ import { dagitimPlani, epostaGecerliMi, grubunKalemleri } from '../dagitim';
 import { DurumRozeti, MesajKutusu } from '../bicim';
 import { tarihSaat } from '../tarih';
 import { AyrintiliKarsilastirma, MevzuatPenceresi } from '../pages/ArsivMevzuat';
+import { BelgeGorselleri } from './BelgeGorselleri';
 
 // Pencereye verilen bilgiler.
 interface RaporModalProps {
@@ -458,6 +459,8 @@ const KalemKarti: React.FC<{
         {k.one_cikanlar.map((c, i) => <div key={i} className="pl-2.5">• {c}</div>)}
       </div>
     )}
+    {/* Belgedeki tablolar ve taranmış tablo/görsel bölümleri (mailde de aynıları gider, ilk 3'ü). */}
+    {(k.gorseller ?? []).length > 0 && <BelgeGorselleri gorseller={k.gorseller ?? []} />}
     {/* Belgenin metni (tıklanınca açılır). */}
     {k.metin && (
       <details className="text-xs">
@@ -479,6 +482,11 @@ const KalemKarti: React.FC<{
       {k.url && (
         <a href={k.url} target="_blank" rel="noopener noreferrer"
           className="ml-2 font-medium text-sky-800 underline hover:text-sky-950">Kaynağa git ↗</a>
+      )}
+      {/* Belgenin alındığı andaki kopyası (kaynakta kalksa ya da değişse de rapora giren hali). */}
+      {k.belge_var && (
+        <a href={`/panel/api/kayit-belgesi/${k.id}`} target="_blank" rel="noopener noreferrer"
+          className="ml-2 font-medium text-sky-800 underline hover:text-sky-950">Saklanan PDF ↗</a>
       )}
     </div>
   </div>

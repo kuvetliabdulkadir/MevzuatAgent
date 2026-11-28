@@ -9,7 +9,8 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 
-from sqlalchemy import JSON, ForeignKey, event, Index, MetaData, String, Text, UniqueConstraint, create_engine, false, text
+from sqlalchemy import (JSON, ForeignKey, event, Index, LargeBinary, MetaData, String, Text, UniqueConstraint,
+                        create_engine, false, text)
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -198,6 +199,35 @@ class Kayit(Base):
     haric: Mapped[bool] = mapped_column(default=False, server_default=false())
     # Sadece "güncel metni değişti" kayıtlarında (surum.py), [{bolum, tur, eski, yeni}, …]
     degisiklikler: Mapped[list | None] = mapped_column(JSON)
+
+
+# Rapora giren belgenin tabloları ve okunamayan bölümlerinin görüntüsü (belge_gorselleri.cikar). Sadece ilgili
+# kayıtlar için saklanır; rapor kalemi (mail, panel) ve arşivdeki "rapora giren belgeler" bunları gösterir.
+class KayitGorseli(Base):
+    __tablename__ = "kayit_gorselleri"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kayit_id: Mapped[int] = mapped_column(ForeignKey("kayitlar.id"), index=True)
+    sira: Mapped[int]
+    sayfa: Mapped[int]  # 1'den başlar
+    tur: Mapped[str] = mapped_column(String(20))  # tablo (satırlar) / goruntu (png)
+    aciklama: Mapped[str] = mapped_column(String(200), default="")
+    tablo: Mapped[list | None] = mapped_column(JSON)  # [[hücre, None (birleşik hücrenin devamı), …], …]
+    png: Mapped[bytes | None] = mapped_column(LargeBinary)
+    genislik: Mapped[int | None]
+    yukseklik: Mapped[int | None]
+
+
+# Rapora giren PDF belgenin kendisi. Kaynaktaki adres değişse ya da sayfa kalksa da rapora giren belge elde kalır.
+class KayitBelgesi(Base):
+    __tablename__ = "kayit_belgeleri"
+
+    kayit_id: Mapped[int] = mapped_column(ForeignKey("kayitlar.id"), primary_key=True)
+    sha256: Mapped[str] = mapped_column(String(64))
+    mime: Mapped[str] = mapped_column(String(100))
+    boyut: Mapped[int]
+    veri: Mapped[bytes] = mapped_column(LargeBinary)
+    alindi: Mapped[datetime]
 
 
 # Alıcı gruplarının tablosu.

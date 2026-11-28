@@ -22,7 +22,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mevzuat import arama, ocr, puan, surum
+from mevzuat import arama, kayit_belgesi, ocr, puan, surum
 from mevzuat.db import Calisma, KaynakDurumu, Kayit
 from mevzuat.filtre import TUM_DUYURULAR, Konu, eslesmeler, is_kollari, tr_kucuk
 from mevzuat.sources.base import Kaynak, KayitTaslagi
@@ -253,6 +253,13 @@ def _icerik_cek(
                 kayit.icerik_durumu = "TAMAM"
             # Konuları içerikle puanla, eşiği geçenleri ekle.
             icerikle_puanla(kayit, konular, agirlik)
+            # Rapora girecek PDF'in kopyası ve tablo/görselleri (mailde ve panelde gösterilir). Hata metni bozmaz.
+            if kayit.ilgili and icerik.belge:
+                try:
+                    with session.begin_nested():  # yarım kalırsa sadece bu kısım geri alınır
+                        kayit_belgesi.sakla(session, kayit, icerik.belge, icerik.ocr_sayfalari)
+                except Exception:
+                    log.exception("Belgenin kopyası/görselleri saklanamadı: %s", kayit.kaynakca)
         except Exception:
             # İndirilemedi, HATA olarak işaretle, bir sonraki çalışmada tekrar denenir.
             log.exception("İçerik alınamadı: %s", kayit.kaynakca)

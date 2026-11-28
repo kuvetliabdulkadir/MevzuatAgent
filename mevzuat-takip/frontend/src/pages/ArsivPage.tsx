@@ -6,6 +6,7 @@ import { ArsivAramaSonucu, ArsivDurumu, ArsivGunlugu, ArsivKonulari, ArsivListes
 import { MesajKutusu } from '../bicim';
 import { tarihSaat } from '../tarih';
 import { MevzuatPenceresi } from './ArsivMevzuat';
+import { RaporBelgeleriKarti } from './ArsivRaporBelgeleri';
 
 // Metin durumlarının ekrandaki adı ve rengi.
 const METIN_DURUMU: Record<ArsivMetinDurumu, { ad: string; renk: string }> = {
@@ -24,6 +25,7 @@ export const ArsivPage: React.FC<{ ayarYonetebilir: boolean }> = ({ ayarYonetebi
   const [secili, setSecili] = useState<{ anahtar: string; sekme?: 'metin' | 'degisiklik' } | null>(null);
   const setSeciliAnahtar = (anahtar: string | null) => setSecili(anahtar ? { anahtar } : null);
   const [gunlukIstek, setGunlukIstek] = useState<number | null>(null);
+  const [raporAranan, setRaporAranan] = useState('');
   const suruyor = !!durum?.istek && AKTIF.includes(durum.istek.durum);
 
   // Durumu sunucudan çeker.
@@ -48,7 +50,8 @@ export const ArsivPage: React.FC<{ ayarYonetebilir: boolean }> = ({ ayarYonetebi
       {hata && <MesajKutusu tur="hata">{hata}</MesajKutusu>}
       {durum && <IsKarti durum={durum} baslatabilir={ayarYonetebilir} suruyor={suruyor} onDegisti={setDurum} onGunluk={setGunlukIstek} />}
       {durum && <SayilarKarti durum={durum} />}
-      {durum && durum.toplam > 0 && <Liste turler={durum.turler} onSec={(anahtar, sekme) => setSecili({ anahtar, sekme })} />}
+      {durum && durum.toplam > 0 && <Liste turler={durum.turler} onSec={(anahtar, sekme) => setSecili({ anahtar, sekme })} onAra={setRaporAranan} />}
+      {durum && <RaporBelgeleriKarti aranan={raporAranan} />}
       {secili && <MevzuatPenceresi anahtar={secili.anahtar} ilkSekme={secili.sekme} onKapat={() => setSecili(null)} />}
       {gunlukIstek !== null && <GunlukPenceresi istekId={gunlukIstek} onSec={setSeciliAnahtar} onKapat={() => setGunlukIstek(null)} />}
     </div>
@@ -255,7 +258,7 @@ interface SurumSecenekleri {
   donemler: { kod: string; gun: number; sayi: number }[];
 }
 
-const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string, sekme?: 'metin' | 'degisiklik') => void }> = ({ turler, onSec }) => {
+const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string, sekme?: 'metin' | 'degisiklik') => void; onAra: (q: string) => void }> = ({ turler, onSec, onAra }) => {
   const [ara, setAra] = useState('');
   const [aranan, setAranan] = useState('');
   // "ad": başlıkta/anahtarda ara (liste), "metin": tam metinde ara (Faz 2).
@@ -295,7 +298,7 @@ const Liste: React.FC<{ turler: ArsivDurumu['turler']; onSec: (anahtar: string, 
   return (
     <div className="bg-white rounded-xl border border-paper-300 overflow-hidden text-xs">
       <form className="px-4 sm:px-5 py-3 border-b border-paper-200 space-y-2"
-        onSubmit={(e) => { e.preventDefault(); setSayfa(1); setAranan(ara); }}>
+        onSubmit={(e) => { e.preventDefault(); setSayfa(1); setAranan(ara); onAra(ara); }}>
         <div className="flex flex-col sm:flex-row gap-2">
           <span className="flex rounded-lg border border-paper-300 overflow-hidden shrink-0">
             {([['ad', 'Adında ara'], ['metin', 'Metninde ara']] as const).map(([k, ad]) => (

@@ -82,6 +82,51 @@ export interface Kalem {
   nedenler: { konu: string; aciklama: string }[]; // eşleşen konuların açıklamaları
   haric: boolean;
   gidecek: { ad: string; kisi: number }[];
+  gorseller?: BelgeGorseli[]; // belgedeki tablolar ve taranmış tablo/görsel görüntüleri
+  belge_var?: boolean; // PDF'in alındığı andaki kopyası saklı
+}
+
+// Rapora giren belgedeki tablo (satır/hücre; [metin, sütun yayılması]) ya da kesilmiş görüntü.
+export interface BelgeGorseli {
+  id: number;
+  sayfa: number;
+  tur: 'tablo' | 'goruntu';
+  aciklama: string;
+  satirlar: [string, number][][] | null;
+  url: string | null; // /panel/api/kayit-gorseli/{id}
+  genislik: number | null;
+  yukseklik: number | null;
+}
+
+// Arşivde "rapora giren diğer belgeler" (RG kurul kararı, ilan, duyuru…).
+export interface RaporBelgesiOzeti {
+  id: number;
+  baslik: string;
+  tur_adi: string;
+  kaynak: string;
+  yayin_tarihi: string;
+  rapor_id: number;
+  haric: boolean;
+  is_kollari: string[];
+  parca: string | null; // sunucuda HTML kaçışlı, sadece <mark> içerir
+  gorsel_sayisi: number;
+  belge_var: boolean;
+  ocr: boolean;
+}
+
+export interface RaporBelgeleri {
+  toplam: number;
+  boyut: number;
+  satirlar: RaporBelgesiOzeti[];
+}
+
+export interface RaporBelgesi extends RaporBelgesiOzeti {
+  kaynakca: string;
+  eslesmeler: Record<string, string[]>;
+  url: string | null;
+  metin: string;
+  okunamadi: boolean;
+  gorseller: BelgeGorseli[];
 }
 
 // Onaylanmış raporun tek bir dağıtım maili.

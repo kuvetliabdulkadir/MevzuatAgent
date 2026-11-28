@@ -7,7 +7,7 @@ import io
 import re
 # tempfile, iş bitince kendiliğinden silinen geçici klasör (OCR resimleri için).
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # pdfplumber, PDF'teki seçilebilir yazıyı çıkarır.
@@ -70,6 +70,10 @@ class Icerik:
     metin: str
     ocr_gerekli: bool = False  # metin eksik ve OCR yapılamadı
     ocr_ile: bool = False  # metin OCR ile okundu, taslaktır, rakam/isim hatası olabilir
+    # PDF belgenin kendisi ve OCR'la okunan sayfaların metni (0'dan sayfa no). İlgili kayıtta tablo/görsel çıkarmak ve
+    # belgenin kopyasını saklamak için (pipeline.belge_gorsellerini_sakla); metne ve filtreye etkisi yok.
+    belge: bytes | None = field(default=None, repr=False, compare=False)
+    ocr_sayfalari: dict[int, str] = field(default_factory=dict, repr=False, compare=False)
 
 
 # Ham baytları doğru harf kodlamasıyla yazıya çevirir.
@@ -169,16 +173,11 @@ def _resim_orani(sayfa) -> float:
     return min(1.0, sum(max(0, (r["x1"] - r["x0"]) * (r["bottom"] - r["top"])) for r in sayfa.images) / alan)
 
 
-# PDF'in metnini çıkarır. Seçilebilir yazı yoksa (taranmış belge) ya da bazı sayfalar resimse OCR yapar.
-def pdf_metni(veri: bytes, sayfa_siniri: int | None | object = _VARSAYILAN_SINIR) -> Icerik:
-    """sayfa_siniri, OCR'ın okuyacağı en fazla sayfa. Verilmezse OCR_SAYFA_SINIRI, None verilirse sınır yok (arşiv)."""
-    if sayfa_siniri is _VARSAYILAN_SINIR:
-        sayfa_siniri = OCR_SAYFA_SINIRI
+# Hangi sayfalar OCR'a gidecek. (sayfaların yazı katmanı, OCR'lanacak sayfa numaraları; hepsi ya da sadece resimliler)
+def ocr_secimi(veri: bytes) -> tuple[list[str], list[int]]:
     sayfalar: list[str] = []
-    # Belgenin tamamı OCR'dan geçecek mi.
     tum_belge_ocr = False
     gorsel_sayfalar: list[int] = []  # karışık belgede OCR'lanacak sayfalar
-    # PDF'i bellekten aç ve sayfa sayfa yazıyı çıkar.
     with pdfplumber.open(io.BytesIO(veri)) as pdf:
         for i, sayfa in enumerate(pdf.pages):
             metin = temiz_sayfa_yazisi(sayfa.extract_text())
@@ -189,22 +188,30 @@ def pdf_metni(veri: bytes, sayfa_siniri: int | None | object = _VARSAYILAN_SINIR
             elif len(metin) < KARISIK_METIN_ESIGI and _resim_orani(sayfa) > KARISIK_RESIM_ORANI:
                 gorsel_sayfalar.append(i)
             sayfalar.append(metin)
-    # Sayfaları birleştir.
-    tum_metin = "\n\n".join(s for s in sayfalar if s)
     # Toplam metin çok kısaysa (sadece başlık/imza okunmuş) yine bütün belgeyi OCR'la.
-    if len(tum_metin) < BELGE_MIN_METIN:
+    if len("\n\n".join(s for s in sayfalar if s)) < BELGE_MIN_METIN:
         tum_belge_ocr = True
+    return sayfalar, list(range(len(sayfalar))) if tum_belge_ocr else gorsel_sayfalar
+
+
+# PDF'in metnini çıkarır. Seçilebilir yazı yoksa (taranmış belge) ya da bazı sayfalar resimse OCR yapar.
+def pdf_metni(veri: bytes, sayfa_siniri: int | None | object = _VARSAYILAN_SINIR) -> Icerik:
+    """sayfa_siniri, OCR'ın okuyacağı en fazla sayfa. Verilmezse OCR_SAYFA_SINIRI, None verilirse sınır yok (arşiv)."""
+    if sayfa_siniri is _VARSAYILAN_SINIR:
+        sayfa_siniri = OCR_SAYFA_SINIRI
+    # Sayfaların yazı katmanı ve OCR'lanacak sayfalar (hepsi ya da sadece resimli olanlar).
+    sayfalar, okunacak = ocr_secimi(veri)
+    tum_belge_ocr = bool(sayfalar) and okunacak == list(range(len(sayfalar)))
+    tum_metin = "\n\n".join(s for s in sayfalar if s)
 
     # OCR'a gerek yok, okunan metni ver.
-    if not tum_belge_ocr and not gorsel_sayfalar:
-        return Icerik(tum_metin)
+    if not okunacak:
+        return Icerik(tum_metin, belge=veri)
     # OCR lazım ama Tesseract yok.
     if not ocr.ocr_kullanilabilir():
         # Metnin tamamı ya da bir kısmı görüntüde ve okunamıyor, raporda "metin eksik" görünmeli.
-        return Icerik(tum_metin, ocr_gerekli=True)
+        return Icerik(tum_metin, ocr_gerekli=True, belge=veri)
 
-    # OCR'lanacak sayfalar, hepsi ya da sadece resimli olanlar.
-    okunacak = list(range(len(sayfalar))) if tum_belge_ocr else gorsel_sayfalar
     # 30 sayfa sınırı aşıldıysa ilk 30 sayfayı al.
     sinir_asildi = sayfa_siniri is not None and len(okunacak) > sayfa_siniri
     if sayfa_siniri is not None:
@@ -225,7 +232,7 @@ def pdf_metni(veri: bytes, sayfa_siniri: int | None | object = _VARSAYILAN_SINIR
         metin += (f"\n\n[Belge {len(sayfalar)} sayfa; otomatik okuma ilk {sayfa_siniri} taranmış sayfayla "
                   "sınırlandı. Tamamı için orijinal belgeye bakın.]")
     # "OCR ile okundu" işaretiyle ver (raporda "otomatik okunmuş" yazar).
-    return Icerik(metin, ocr_ile=True)
+    return Icerik(metin, ocr_ile=True, belge=veri, ocr_sayfalari=dict(okunan))
 
 
 # İndirilen bir belge PDF mi HTML mi, karar verip uygun okuyucuya gönderir.

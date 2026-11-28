@@ -51,6 +51,7 @@ from mevzuat import (
     alicilar,
     arsiv,
     gecmis,
+    kayit_belgesi,
     kaynak_bulucu,
     kaynak_yonetimi,
     konu_yonetimi,
@@ -60,7 +61,7 @@ from mevzuat import (
 from mevzuat import panel_ayarlari
 from mevzuat import rapor as rapor_modulu
 from mevzuat.db import (
-    AliciGrubu, ApiAnahtari, Denetim, KaynakTanimi, KonuTanimi, Kullanici, MenuOgesi, ParolaLinki, Rapor,
+    AliciGrubu, ApiAnahtari, Denetim, KaynakTanimi, KayitGorseli, KonuTanimi, Kullanici, MenuOgesi, ParolaLinki, Rapor,
 )
 from mevzuat.http import make_client
 from mevzuat.mail import DosyaGonderici, Mail, MailGonderici
@@ -133,7 +134,7 @@ API_GRUPLARI = {
     "parola-linki": "Oturum ve giriş", "menu": "Menü", "raporlar": "Raporlar", "gruplar": "Alıcı grupları",
     "kaynaklar": "Kaynaklar", "kaynak-tipleri": "Kaynaklar", "konular": "Konular", "tarama": "Tarama",
     "zamanlama": "Tarama", "kullanicilar": "Kullanıcılar", "denetim": "Denetim kaydı", "ayarlar": "Ayarlar",
-    "api-anahtarlari": "API anahtarları", "arsiv": "Arşiv",
+    "api-anahtarlari": "API anahtarları", "arsiv": "Arşiv", "kayit-gorseli": "Raporlar", "kayit-belgesi": "Raporlar",
 }
 
 # "anahtar@v2" biçimli değişen mevzuat kaydının arşivdeki karşılığı {anahtar, surum}; eski biçimde (MetinSurumu) None.
@@ -702,6 +703,9 @@ def uygulama_olustur(
                     "hakkinda": [{"ad": ad, "metin": metin} for ad, metin in k.hakkinda],
                     # Arşivle bağlı "güncel metni değişti" kalemi: panel arşivdeki tam karşılaştırmayı açar.
                     "arsiv_surumu": _arsiv_surumu(k.kayit), "haric": k.kayit.haric,
+                    # Belgedeki tablolar (satır/hücre) ve taranmış tablo/görsel görüntüleri; saklanan PDF kopyası.
+                    "gorseller": [kayit_belgesi.gorsel_sozlugu(g, f"{PANEL_ON_EK}/kayit-gorseli") for g in k.gorseller],
+                    "belge_var": kayit_belgesi.belgesi_var_mi(db, k.kayit.id),
                     # Onaylayıcı belgenin aslına baksın diye resmî adres, sadece http ve https.
                     "url": k.kayit.url if k.kayit.url.startswith(("https://", "http://")) else None,
                     # Başlıkta kelimesi yakalanan konuların açıklamaları, bu konu bizi neden ilgilendiriyor.
@@ -1355,6 +1359,47 @@ def uygulama_olustur(
         if bulunan is None:
             raise HTTPException(404, "Bu sürümün PDF'i arşivde yok.")
         return arsiv_dosya_cevabi(bulunan[0], bulunan[1], "pdf", indir)
+
+    # Rapora giren ama arşiv türü olmayan belgeler (RG kurul kararı, ilan, duyuru…): arama ve ayrıntı.
+    @api.get("/arsiv/rapor-belgeleri")
+    def rapor_belgeleri(request: Request, q: str = "", sayfa: int = 1):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            return kayit_belgesi.liste(db, q[:200], sayfa)
+
+    @api.get("/arsiv/rapor-belgeleri/{kayit_id}")
+    def rapor_belgesi(request: Request, kayit_id: int):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            sonuc = kayit_belgesi.detay(db, kayit_id, f"{PANEL_ON_EK}/kayit-gorseli")
+            if sonuc is None:
+                raise HTTPException(404, "Rapora giren böyle bir belge yok.")
+            return sonuc
+
+    # Rapora giren belgenin tablo/görsel görüntüsü ve saklanan PDF kopyası (rapor penceresi ve arşiv).
+    @api.get("/kayit-gorseli/{gorsel_id}")
+    def kayit_gorseli(request: Request, gorsel_id: int):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            g = db.get(KayitGorseli, gorsel_id)
+            if g is None or not g.png:
+                raise HTTPException(404, "Görüntü yok.")
+            return Response(g.png, media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
+
+    @api.get("/kayit-belgesi/{kayit_id}")
+    def kayit_belgesi_pdf(request: Request, kayit_id: int, indir: bool = False):
+        with Oturum() as db:
+            giris_gerekli(request, db)
+            b = kayit_belgesi.belge(db, kayit_id)
+            if b is None:
+                raise HTTPException(404, "Belgenin kopyası saklanmamış.")
+            kip = "attachment" if indir else "inline"
+            return Response(b.veri, media_type="application/pdf", headers={
+                "Content-Disposition": f'{kip}; filename="belge-{kayit_id}.pdf"',
+                # Satır içi PDF panelde çerçevede açılabilir; başka site çerçeveye alamaz (arsiv_dosya_cevabi gibi).
+                "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
+                                           "frame-ancestors 'self'",
+                "Cache-Control": "private, max-age=3600"})
 
     # Bir arşiv işinin ayrıntılı günlüğü: özet ve kayıtlar (`sadece=hata|uyari`).
     @api.get("/arsiv/gunluk/{istek_id}")

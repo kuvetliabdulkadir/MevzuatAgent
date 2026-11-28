@@ -111,7 +111,7 @@ def bozuk_satir_mi(satir: str) -> bool:
 
 # "..,....,..,.,.," gibi virgül-nokta yığını (taranmış tablodaki noktalı çizgi) silinir; sadece noktadan oluşan
 # içindekiler çizgisi ("Madde 1 ........ 3") kalır.
-def _noktalama_yiginsiz(satir: str) -> str:
+def noktalama_yiginsiz(satir: str) -> str:
     return _NOKTALAMA_YIGINI.sub(
         lambda m: "" if m.group().count(",") >= 2 and m.group().count(".") >= 2 else m.group(), satir)
 
@@ -124,7 +124,7 @@ def _kisa_gurultu(satir: str) -> bool:
 def okunamayanlari_ayikla(metin: str, ocr: bool = False) -> str:
     """Bozuk satırların yerine (art arda olanlar tek) OKUNAMAYAN notu konur. OCR metninde boş satırla ayrılmış 1-3
     harflik satırlar ("GEZ", "O", "ES": damga, kenar çizgisi) da atılır."""
-    satirlar = [_noktalama_yiginsiz(s) for s in metin.split("\n")]
+    satirlar = [noktalama_yiginsiz(s) for s in metin.split("\n")]
     cikti: list[str] = []
     blokta = bos_atlandi = False
     for i, s in enumerate(satirlar):

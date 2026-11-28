@@ -185,6 +185,38 @@ def ilgili_komutu(args: argparse.Namespace) -> None:
             print(f"  Kaynak: {k.kaynakca}\n")
 
 
+# "rapor-belgeleri-doldur": bu özellikten önce rapora giren (ya da onay bekleyen) PDF belgelerin kopyası ve
+# tablo/görselleri. Günlük iş yenileri zaten kendisi saklar.
+def rapor_belgeleri_doldur_komutu(args: argparse.Namespace) -> None:
+    from mevzuat import kayit_belgesi
+    from mevzuat.db import KayitBelgesi
+
+    engine = make_engine()
+    migrate(engine)
+    sinir = date.today() - timedelta(days=args.gun)
+    with Session(engine) as session, make_client() as client:
+        sorgu = select(Kayit).where(Kayit.ilgili, Kayit.yayin_tarihi >= sinir,
+                                    Kayit.icerik_durumu != "BEKLIYOR").order_by(Kayit.id)
+        if not args.yeniden:
+            sorgu = sorgu.where(~select(KayitBelgesi.kayit_id).where(KayitBelgesi.kayit_id == Kayit.id).exists())
+        kayitlar = session.scalars(sorgu).all()
+        print(f"{len(kayitlar)} kayıt")
+        for k in kayitlar:
+            if k.degisiklikler or not k.url.startswith(("http://", "https://")):
+                continue  # değişen mevzuat kalemi arşivde; adresi olmayan kayıt
+            try:
+                cevap = client.get(k.url)
+                cevap.raise_for_status()
+            except Exception as e:
+                print(f"  #{k.id} indirilemedi: {e!r}")
+                continue
+            if cevap.content[:5] != b"%PDF-":
+                continue  # HTML belge: metni zaten kayıtta, kopya ve görsel yok
+            sayi = kayit_belgesi.sakla(session, k, cevap.content)
+            session.commit()
+            print(f"  #{k.id} {sayi} tablo/görsel · {k.baslik[:80]}")
+
+
 # "onizle" komutu, raporun nasıl görüneceğini dosyaya yazar, hiçbir şeyi işaretlemez ya da göndermez.
 def onizle_komutu(args: argparse.Namespace) -> None:
     """Onaya sunulmamış kayıtlardan raporun nasıl görüneceğini dosyaya yazar. Hiçbir şey işaretlenmez.
@@ -661,6 +693,12 @@ def main() -> None:
     il = alt.add_parser("ilgili", help="İlgili kayıtları listele (rapor önizlemesi)")
     il.add_argument("--gun", type=int, default=7)
     il.set_defaults(func=ilgili_komutu)
+
+    rb = alt.add_parser("rapor-belgeleri-doldur",
+                        help="İlgili PDF belgelerin kopyasını ve tablo/görsellerini sonradan sakla")
+    rb.add_argument("--gun", type=int, default=60, help="son N günde yayımlananlar (varsayılan 60)")
+    rb.add_argument("--yeniden", action="store_true", help="kopyası olanları da yeniden işle")
+    rb.set_defaults(func=rapor_belgeleri_doldur_komutu)
 
     rg = alt.add_parser("rg", help="Resmî Gazete fihristini listele")
     rg.add_argument("--tarih", help="YYYY-MM-DD (varsayılan: bugün)")

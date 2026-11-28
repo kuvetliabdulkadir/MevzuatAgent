@@ -22,7 +22,7 @@ from markupsafe import Markup, escape
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from mevzuat import alicilar, surum
+from mevzuat import alicilar, kayit_belgesi, surum
 from mevzuat.metin_duzen import OKUNAMAYAN, okunamayanlari_ayikla
 from mevzuat.db import Gonderim, Kayit, KonuTanimi, Rapor
 from mevzuat.filtre import TUM_DUYURULAR, tr_kucuk
@@ -132,6 +132,11 @@ class RaporKalemi:
     nedenler: list[tuple[str, str]] = field(default_factory=list)
     # Belgenin resmî kaynaktaki adresi (sadece http ve https), rapor_olustur doldurur.
     kaynak_linki: str | None = None
+    # Belgedeki tablolar ve taranmış tablo/görsel bölümleri (db.KayitGorseli, kayit_belgesi.sakla), _kalem doldurur.
+    gorseller: list = field(default_factory=list)
+    # Maile girenler ({aciklama, sayfa, satirlar, satir_fazlasi, cid, genislik}) ve girmeyen sayısı, rapor_olustur doldurur.
+    mail_gorselleri: list[dict] = field(default_factory=list)
+    gorsel_fazlasi: int = 0
 
 
 # RG alt başlıkları büyük harf ve çoğul ("CUMHURBAŞKANI KARARLARI"), raporda tekil ve okunur ad.
@@ -521,6 +526,7 @@ def _kalem(no: int, kayit: Kayit, session: Session | None = None) -> RaporKalemi
         ocr=kayit.icerik_durumu == "OCR_ILE_OKUNDU",
         # Özet zaten MADDE 1'in ilk cümlesi (çoğu zaman Amaç); aynı cümle iki kez yazılmaz.
         hakkinda=[(ad, c) for ad, c in hakkinda_satirlari(metin) if not (ozet and c.startswith(ozet[:60]))] if metin else [],
+        gorseller=kayit_belgesi.gorseller(session, kayit.id) if session is not None and kayit.id else [],
     )
 
 
@@ -542,6 +548,49 @@ def _ek_indir(client: httpx.Client, kalem: RaporKalemi, onbellek: dict[str, byte
     # Ek dosya adı, "01_20261001_belge.pdf".
     ad = f"{kalem.no:02d}_{kalem.kayit.yayin_tarihi:%Y%m%d}_{PurePosixPath(urlparse(url).path).name}"
     return Ek(ad, onbellek[url], "application/pdf")
+
+
+# Mailde kalem başına en fazla bu kadar tablo/görsel; görüntüler toplamı ve tablo satırı sınırlı (mail şişmesin).
+MAIL_KALEM_GORSEL = 3
+MAIL_GORUNTU_SINIRI = 3 * 1024 * 1024
+MAIL_TABLO_SATIRI = 30
+
+
+# Tablo satırları gösterim için: [(metin, yayılma)]. pdfplumber birleşik hücrenin devamını None verir, önceki hücre genişler.
+def tablo_hucreleri(tablo: list[list], sinir: int | None = None) -> tuple[list[list[tuple[str, int]]], int]:
+    satirlar = []
+    for s in tablo[:sinir] if sinir else tablo:
+        hucreler: list[tuple[str, int]] = []
+        for h in s:
+            if h is None:
+                if hucreler:
+                    hucreler[-1] = (hucreler[-1][0], hucreler[-1][1] + 1)
+                continue
+            hucreler.append((linksiz(str(h)), 1))
+        if hucreler:
+            satirlar.append(hucreler)
+    return satirlar, (max(0, len(tablo) - sinir) if sinir else 0)
+
+
+# Kalemlerin maile girecek tablo/görselleri; görüntüler mailin içine gömülür (cid), tablolar HTML tablo olur.
+def _mail_gorselleri(kalemler: list[RaporKalemi]) -> list[Ek]:
+    gomulu: list[Ek] = []
+    bayt = 0
+    for kalem in kalemler:
+        secilen = kalem.gorseller[:MAIL_KALEM_GORSEL]
+        kalem.gorsel_fazlasi = len(kalem.gorseller) - len(secilen)
+        kalem.mail_gorselleri = []
+        for g in secilen:
+            d = {"aciklama": g.aciklama, "sayfa": g.sayfa, "genislik": g.genislik, "satirlar": None,
+                 "satir_fazlasi": 0, "cid": None}
+            if g.tablo:
+                d["satirlar"], d["satir_fazlasi"] = tablo_hucreleri(g.tablo, MAIL_TABLO_SATIRI)
+            elif g.png and bayt + len(g.png) <= MAIL_GORUNTU_SINIRI:
+                d["cid"] = f"gorsel{g.id}@mevzuat-takip"
+                gomulu.append(Ek(f"gorsel{g.id}.png", g.png, "image/png", cid=d["cid"]))
+                bayt += len(g.png)
+            kalem.mail_gorselleri.append(d)
+    return gomulu
 
 
 # Belgenin resmî kaynaktaki adresi, her kalemin altında ve maile eklenemeyen belgeler listesinde.
@@ -607,6 +656,8 @@ def rapor_olustur(
             ekler.append(ek)
             kalem.ek_adi = ek.dosya_adi
 
+    gomulu = _mail_gorselleri(kalemler)
+
     # Kalemleri iş kollarına göre grupla (raporun başındaki "iş koluna göre" özeti).
     is_kollari: dict[str, list[RaporKalemi]] = {}
     for kalem in kalemler:
@@ -631,6 +682,7 @@ def rapor_olustur(
         metin=_sablonlar.get_template("rapor.txt.j2").render(**baglam),
         alicilar=[],
         ekler=ekler,
+        gomulu=gomulu,
     )
 
 

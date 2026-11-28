@@ -93,6 +93,9 @@ Neden önemli{% if k.kayit.eslesmeler|length > 1 %} ({{ konu }}){% endif %}: {{ 
 {% for c in k.one_cikanlar %}
   • {{ c }}
 {% endfor %}
+{% if k.mail_gorselleri %}
+Belgede {{ k.mail_gorselleri|length + k.gorsel_fazlasi }} tablo/görsel var (mailin HTML görünümünde ve ekteki belgede).
+{% endif %}
 Kaynakça: {{ k.kaynakca }}
 {% if k.kaynak_linki %}
 Kaynak: {{ k.kaynak_linki }}
