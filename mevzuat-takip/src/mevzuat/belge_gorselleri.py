@@ -47,14 +47,20 @@ class Gorsel:
     yukseklik: int | None = None
 
 
-def _png(gorsel: Image.Image) -> tuple[bytes, int, int]:
+# Gösterim boyutu belgedeki gerçek boyuttur (inç başına 92 piksel: A4 yazı alanı ~600 piksel); dar tablo geniş
+# görünmez, bütün görüntüler aynı yazı büyüklüğünde. PNG'nin kendisi en fazla GORUNTU_GENISLIGI (net kalsın).
+GOSTERIM_PPI = 92
+
+
+def _png(gorsel: Image.Image, dpi: int) -> tuple[bytes, int, int]:
+    gosterim = (round(gorsel.width * GOSTERIM_PPI / dpi), round(gorsel.height * GOSTERIM_PPI / dpi))
     g = gorsel.convert("L")
     if g.width > GORUNTU_GENISLIGI:
         g = g.resize((GORUNTU_GENISLIGI, round(g.height * GORUNTU_GENISLIGI / g.width)), Image.LANCZOS)
     g = g.quantize(colors=16)
     tampon = io.BytesIO()
     g.save(tampon, format="PNG", optimize=True)
-    return tampon.getvalue(), g.width, g.height
+    return tampon.getvalue(), *gosterim
 
 
 def _hucre(deger) -> str | None:
@@ -95,7 +101,7 @@ def _yazili_tablolar(pdf: pdfplumber.PDF, sayfalar: list[int]) -> list[Gorsel]:
             sayfa = pdf.pages[i]
             x0, top, x1, bottom = t.bbox
             kutu = (max(0, x0 - 4), max(0, top - 4), min(sayfa.width, x1 + 4), min(sayfa.height, bottom + 4))
-            png, gen, yuk = _png(sayfa.crop(kutu).to_image(resolution=TABLO_DPI).original)
+            png, gen, yuk = _png(sayfa.crop(kutu).to_image(resolution=TABLO_DPI).original, TABLO_DPI)
             sonuc.append(Gorsel(i + 1, "goruntu", f"s. {i + 1} tablo {n}", png=png, genislik=gen, yukseklik=yuk))
     return sonuc
 
@@ -302,7 +308,7 @@ def _ocr_bolgeleri(veri: bytes, sayfalar: list[int], tsv_sayfalari: set[int]) ->
                         birlesik.append(list(b))
                 for n, (ust, alt, sol, sag, tablo) in enumerate(birlesik, start=1):
                     kutu = (max(0, sol - PAY), max(0, ust - PAY), min(resim.width, sag + PAY), min(resim.height, alt + PAY))
-                    png, gen, yuk = _png(resim.crop(kutu))
+                    png, gen, yuk = _png(resim.crop(kutu), OCR_DPI)
                     ad = "tablo (taranmış)" if tablo else "okunamayan bölüm (taranmış tablo ya da görsel)"
                     sonuc.append(Gorsel(i + 1, "goruntu", f"s. {i + 1} {ad}" + (f" {n}" if len(birlesik) > 1 else ""),
                                         png=png, genislik=gen, yukseklik=yuk))
